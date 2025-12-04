@@ -3,6 +3,10 @@ export type XYPad = {
 	getPosition: () => { x: number; y: number };
 	onChange: (cb: (pos: { x: number; y: number }) => void) => void;
 	setCornerLabels: (labels: { tl?: string; tr?: string; bl?: string; br?: string }) => void;
+	setSpeed?: (normal: number, shift: number) => void; // Optional method for setting keyboard speeds
+	setReverbMix?: (reverbMix: number) => void; // Optional method for setting reverb mix (0..1) to control symbol count
+	setFilterCutoff?: (cutoffHz: number, cornerWeight: number) => void; // Optional method for setting filter cutoff to control color tint (radial from TL corner)
+	setDensity?: (density: number, cornerWeight: number) => void; // Optional method for setting density (1-60) to control grid animation (radial from TR corner)
 };
 
 export function createXYPad(canvas: HTMLCanvasElement): XYPad {

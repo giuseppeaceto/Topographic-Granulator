@@ -8,6 +8,9 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 	let pos = { x: 0.5, y: 0.5 };
 	let dragging = false;
 	let labels: CornerLabels = {};
+	// Configurable speeds
+	let normalSpeed = 0.15;
+	let shiftSpeed = 0.05;
 
 	// Three.js renderer with the provided canvas
 	const renderer = new THREE.WebGLRenderer({
@@ -27,6 +30,13 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 	scene.position.y = 0.2;
 	// enlarge slightly
 	scene.scale.set(1.12, 1.12, 1);
+
+	// Lighting for the 3D sphere
+	const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+	scene.add(ambientLight);
+	const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+	directionalLight.position.set(1, 1, 1);
+	scene.add(directionalLight);
 
 	// Wireframe grid geometry
 	const gridCols = 18;
@@ -79,13 +89,70 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 	const lines = new THREE.LineSegments(geometry, material);
 	scene.add(lines);
 
-	// Knob (small circle) rendered above the grid
-	const knobGeom = new THREE.CircleGeometry(6, 32);
-	const knobMat = new THREE.MeshBasicMaterial({ color: 0xd0d0d0 });
+	// Knob (3D sphere) rendered above the grid
+	const knobGeom = new THREE.SphereGeometry(1, 16, 16);
+	const knobMat = new THREE.MeshStandardMaterial({ 
+		color: 0xd0d0d0,
+		metalness: 0.3,
+		roughness: 0.4
+	});
 	const knob = new THREE.Mesh(knobGeom, knobMat);
 	scene.add(knob);
-	knob.scale.set(0.002, 0.002, 0.002); // scale to world units (since geometry is in px)
+	knob.scale.set(0.04, 0.04, 0.04); // scale to world units (più grande)
 	knob.position.z = 0.02;
+
+	// Symbol particles system - simboli strani vicino ai vertici influenzati
+	const symbolsGroup = new THREE.Group();
+	scene.add(symbolsGroup);
+	
+	// Array per tracciare i simboli attivi
+	type SymbolData = {
+		mesh: THREE.Mesh;
+		vertexIndex: number;
+		baseX: number;
+		baseY: number;
+	};
+	const activeSymbols: SymbolData[] = [];
+	const maxSymbolsWhenFull = 30; // numero massimo di simboli quando riverbero = 1
+	let reverbMix = 0; // valore del riverbero (0..1) che controlla quanti simboli mostrare
+	let filterCutoffHz = 4000; // valore del filtro cutoff (Hz)
+	let cutoffCornerWeight = 0; // peso del vertice TL (0..1) per l'effetto radiale
+	let density = 15; // valore della densità (1-60 grains/sec) per l'animazione della griglia
+	let densityCornerWeight = 0; // peso del vertice TR (0..1) per l'effetto radiale della densità
+	
+	// Funzione per creare simboli geometrici interessanti (solo poligoni)
+	function createSymbol(shapeType: number): THREE.Mesh {
+		let geom: THREE.BufferGeometry;
+		const size = 0.015;
+		
+		switch (shapeType % 4) {
+			case 0: // Triangolo (prisma triangolare)
+				geom = new THREE.CylinderGeometry(size * 0.6, size * 0.6, size * 0.8, 3);
+				break;
+			case 1: // Quadrato (prisma quadrato)
+				geom = new THREE.BoxGeometry(size * 1.2, size * 1.2, size * 0.8);
+				break;
+			case 2: // Pentagono (prisma pentagonale)
+				geom = new THREE.CylinderGeometry(size * 0.7, size * 0.7, size * 0.8, 5);
+				break;
+			default: // Esagono (prisma esagonale)
+				geom = new THREE.CylinderGeometry(size * 0.8, size * 0.8, size * 0.8, 6);
+		}
+		
+		const mat = new THREE.MeshStandardMaterial({
+			color: 0x88ccff,
+			emissive: 0x2244aa,
+			emissiveIntensity: 0.3,
+			metalness: 0.6,
+			roughness: 0.3,
+			transparent: true,
+			opacity: 0.8
+		});
+		
+		const mesh = new THREE.Mesh(geom, mat);
+		mesh.rotation.z = Math.random() * Math.PI * 2;
+		return mesh;
+	}
 
 	let bufferW = 0;
 	let bufferH = 0;
@@ -137,6 +204,40 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 		knob.position.x = kx;
 		knob.position.y = ky;
 
+		// Calcola il colore ciano per la sfera in base al cutoff e alla distanza dal vertice TL
+		const cutoffMin = 200;
+		const cutoffMax = 12000;
+		const cutoffNorm = Math.max(0, Math.min(1, (filterCutoffHz - cutoffMin) / (cutoffMax - cutoffMin)));
+		const cyanIntensity = cutoffNorm * cutoffCornerWeight;
+		const cornerTL = { x: 0, y: 0 };
+		const distTLKnob = Math.sqrt((kx - cornerTL.x) ** 2 + (ky - cornerTL.y) ** 2);
+		const maxDist = Math.sqrt(2);
+		const radialFactorKnob = 1 - Math.min(1, distTLKnob / maxDist);
+		const cyanAmountKnob = cyanIntensity * radialFactorKnob;
+		
+		// Colore base grigio: 0xd0d0d0 = RGB(208, 208, 208) / 255
+		const baseR = 0xd0 / 255;
+		const baseG = 0xd0 / 255;
+		const baseB = 0xd0 / 255;
+		
+		// Applica il ciano (molto più intenso e colorato)
+		// Riduci il rosso completamente quando c'è ciano
+		const knobR = Math.max(0, Math.min(1, baseR * (1 - cyanAmountKnob * 1.2)));
+		// Aumenta verde e blu molto di più, con boost di luminosità
+		const knobG = Math.max(0, Math.min(1, baseG + cyanAmountKnob * 1.0 + cyanAmountKnob * 0.3));
+		const knobB = Math.max(0, Math.min(1, baseB + cyanAmountKnob * 1.2 + cyanAmountKnob * 0.4));
+		
+		// Aggiorna il colore della sfera
+		knobMat.color.setRGB(knobR, knobG, knobB);
+		// Aumenta l'emissività quando c'è ciano per renderla più luminosa
+		if (cyanAmountKnob > 0) {
+			knobMat.emissive.setRGB(knobR * 0.3, knobG * 0.5, knobB * 0.6);
+			knobMat.emissiveIntensity = cyanAmountKnob * 0.8;
+		} else {
+			knobMat.emissive.setRGB(0, 0, 0);
+			knobMat.emissiveIntensity = 0;
+		}
+
 		// attenuation radii
 		const influence = 0.25; // in world units
 		const influenceSq = influence * influence;
@@ -152,6 +253,41 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 			const w3 = Math.sin((x + y) * Math.PI * 2 * (freq2 / 10)) * 0.5 + 0.5;
 			const h = (w1 + w2 + w3) / 3;
 			return (h - 0.5) * 2 * mountainAmp; // static mountains, no continuous motion
+		}
+		
+		// Animazione basata sulla densità: pulsazione ritmica della griglia
+		// La densità va da 1 a 60 grains/sec, normalizziamo per l'animazione
+		const densityNorm = Math.max(0, Math.min(1, (density - 1) / (60 - 1)));
+		const densityIntensity = densityNorm * densityCornerWeight;
+		
+		// Vertice TR (top-right) è a (1, 0) nello spazio normalizzato
+		const cornerTR = { x: 1, y: 0 };
+		
+		function densityPulse(x: number, y: number): number {
+			if (densityIntensity <= 0) return 0;
+			
+			// Calcola distanza dal vertice TR
+			const dx = x - cornerTR.x;
+			const dy = y - cornerTR.y;
+			const dist = Math.sqrt(dx * dx + dy * dy);
+			const maxDist = Math.sqrt(2);
+			const radialFactor = 1 - Math.min(1, dist / maxDist);
+			
+			// Frequenza di pulsazione basata sulla densità (più densità = più veloce)
+			// Normalizza la densità per avere una frequenza ragionevole (0.5-3 Hz)
+			const pulseFreq = 0.5 + densityNorm * 2.5;
+			const pulsePhase = tSec * pulseFreq * Math.PI * 2;
+			
+			// Pulsazione con onda sinusoidale, più intensa vicino al vertice TR
+			const pulse = Math.sin(pulsePhase) * 0.08 * densityIntensity * radialFactor;
+			
+			// Aggiungi anche onde multiple che si propagano dal vertice TR
+			const waveSpeed = 0.8 + densityNorm * 1.2; // velocità onde basata sulla densità
+			const waveLength = 0.15;
+			const wavePhase = (dist / waveLength) - (tSec * waveSpeed);
+			const wave = Math.sin(wavePhase * Math.PI * 2) * 0.04 * densityIntensity * radialFactor;
+			
+			return pulse + wave;
 		}
 		// ripple from knob movement
 		const rippleAmp = 0.04;
@@ -170,9 +306,89 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 			return rippleAmp * Math.sin(phase) * decay;
 		}
 
+		// Raccogli informazioni sui vertici più influenzati per i simboli
+		type VertexInfluence = { index: number; x: number; y: number; weight: number; z: number };
+		const vertexInfluences: VertexInfluence[] = [];
+		
+		// Usa i vertici della griglia normalizzata
+		for (let i = 0; i < totalPoints; i++) {
+			const x = normPositions[i * 2 + 0];
+			const y = normPositions[i * 2 + 1];
+			const dx = x - kx;
+			const dy = y - ky;
+			const dSq = dx * dx + dy * dy;
+			if (dSq < influenceSq) {
+				const weight = 1 - Math.sqrt(dSq / influenceSq);
+				const z = baseHeight(x, y) + rippleHeight(x, y) + densityPulse(x, y) + 0.18 * weight;
+				vertexInfluences.push({ index: i, x, y, weight, z });
+			}
+		}
+		
+		// Ordina per peso (più influenzati prima) e calcola quanti simboli mostrare in base al riverbero
+		vertexInfluences.sort((a, b) => b.weight - a.weight);
+		// Soglia minima: i poligoni compaiono solo quando il riverbero supera questa soglia
+		const reverbThreshold = 0.3; // soglia minima (0.3 = 30%)
+		const effectiveMix = reverbMix < reverbThreshold 
+			? 0 
+			: (reverbMix - reverbThreshold) / (1 - reverbThreshold); // normalizza tra 0 e 1 dopo la soglia
+		const maxSymbols = Math.floor(effectiveMix * maxSymbolsWhenFull);
+		const topVertices = vertexInfluences.slice(0, maxSymbols);
+		
+		// Aggiorna o crea simboli per i vertici più influenzati
+		while (activeSymbols.length < topVertices.length) {
+			const shapeType = activeSymbols.length;
+			const symbol = createSymbol(shapeType);
+			symbolsGroup.add(symbol);
+			activeSymbols.push({
+				mesh: symbol,
+				vertexIndex: -1,
+				baseX: 0,
+				baseY: 0
+			});
+		}
+		
+		// Rimuovi simboli in eccesso
+		while (activeSymbols.length > topVertices.length) {
+			const removed = activeSymbols.pop()!;
+			symbolsGroup.remove(removed.mesh);
+			removed.mesh.geometry.dispose();
+			(removed.mesh.material as THREE.Material).dispose();
+		}
+		
+		// Aggiorna posizioni e proprietà dei simboli
+		for (let i = 0; i < topVertices.length; i++) {
+			const vertex = topVertices[i];
+			const symbol = activeSymbols[i];
+			
+			// Posiziona il simbolo sopra il vertice
+			symbol.mesh.position.x = vertex.x;
+			symbol.mesh.position.y = vertex.y;
+			symbol.mesh.position.z = vertex.z + 0.05; // leggermente sopra il vertice
+			
+			// Scala in base al peso (più influenzato = più grande)
+			const scale = 0.5 + vertex.weight * 1.5;
+			symbol.mesh.scale.set(scale, scale, scale);
+			
+			// Rotazione animata in base al tempo e al peso
+			symbol.mesh.rotation.z = tSec * (0.5 + vertex.weight * 2) + i * 0.5;
+			symbol.mesh.rotation.y = tSec * (0.3 + vertex.weight * 1.5);
+			
+			// Opacità e colore in base al peso
+			const mat = symbol.mesh.material as THREE.MeshStandardMaterial;
+			mat.opacity = 0.4 + vertex.weight * 0.6;
+			
+			// Colore che cambia in base al peso (da blu a ciano a bianco)
+			const hue = 0.55 + vertex.weight * 0.15; // da blu a ciano
+			const saturation = 0.6 + vertex.weight * 0.4;
+			const lightness = 0.5 + vertex.weight * 0.5;
+			mat.color.setHSL(hue, saturation, lightness);
+			mat.emissive.setHSL(hue, saturation * 0.5, lightness * 0.3);
+		}
+
 		// For each vertex compute height and brightness based on distance to knob
 		let c = 0;
 		let p = 0;
+		
 		for (let s = 0; s < segments.length; s++) {
 			// endpoint 1
 			const x1 = linePositions[p + 0];
@@ -182,7 +398,7 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 			const w1 = d1 < influenceSq ? 1 - Math.sqrt(d1 / influenceSq) : 0;
 			const minI = 0.18, maxI = 0.92;
 			const i1 = minI + (maxI - minI) * w1;
-			const z1 = baseHeight(x1, y1) + rippleHeight(x1, y1) + 0.18 * w1; // mountains + ripple + interactive peak
+			const z1 = baseHeight(x1, y1) + rippleHeight(x1, y1) + densityPulse(x1, y1) + 0.18 * w1; // mountains + ripple + density pulse + interactive peak
 			linePositions[p + 2] = z1;
 
 			// endpoint 2
@@ -192,12 +408,37 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 			const d2 = dx2 * dx2 + dy2 * dy2;
 			const w2 = d2 < influenceSq ? 1 - Math.sqrt(d2 / influenceSq) : 0;
 			const i2 = minI + (maxI - minI) * w2;
-			const z2 = baseHeight(x2, y2) + rippleHeight(x2, y2) + 0.18 * w2;
+			const z2 = baseHeight(x2, y2) + rippleHeight(x2, y2) + densityPulse(x2, y2) + 0.18 * w2;
 			linePositions[p + 5] = z2;
 
-			// encode brightness in RGB equally; material uses global opacity
-			lineColors[c++] = i1; lineColors[c++] = i1; lineColors[c++] = i1;
-			lineColors[c++] = i2; lineColors[c++] = i2; lineColors[c++] = i2;
+			// Calcola distanza radiale dal vertice TL per endpoint 1
+			const distTL1 = Math.sqrt((x1 - cornerTL.x) ** 2 + (y1 - cornerTL.y) ** 2);
+			const maxDist = Math.sqrt(2); // distanza massima (diagonale da TL a BR)
+			const radialFactor1 = 1 - Math.min(1, distTL1 / maxDist); // 1 al vertice TL, 0 al vertice opposto
+			const cyanAmount1 = cyanIntensity * radialFactor1;
+
+			// Calcola distanza radiale dal vertice TL per endpoint 2
+			const distTL2 = Math.sqrt((x2 - cornerTL.x) ** 2 + (y2 - cornerTL.y) ** 2);
+			const radialFactor2 = 1 - Math.min(1, distTL2 / maxDist);
+			const cyanAmount2 = cyanIntensity * radialFactor2;
+
+			// Mescola il colore grigio con il ciano (ciano = RGB(0, 1, 1)) - molto più intenso e colorato
+			// Riduci il rosso completamente quando c'è ciano, aumenta verde e blu con boost di luminosità
+			const r1 = Math.max(0, Math.min(1, i1 * (1 - cyanAmount1 * 1.2))); // riduci rosso completamente
+			const g1 = Math.max(0, Math.min(1, i1 + cyanAmount1 * 1.0 + cyanAmount1 * 0.3)); // aumenta verde molto di più con luminosità
+			const b1 = Math.max(0, Math.min(1, i1 + cyanAmount1 * 1.2 + cyanAmount1 * 0.4)); // aumenta blu molto di più con luminosità
+			
+			const r2 = Math.max(0, Math.min(1, i2 * (1 - cyanAmount2 * 1.2)));
+			const g2 = Math.max(0, Math.min(1, i2 + cyanAmount2 * 1.0 + cyanAmount2 * 0.3));
+			const b2 = Math.max(0, Math.min(1, i2 + cyanAmount2 * 1.2 + cyanAmount2 * 0.4));
+
+			// encode color with cyan tint
+			lineColors[c++] = Math.max(0, Math.min(1, r1)); 
+			lineColors[c++] = Math.max(0, Math.min(1, g1)); 
+			lineColors[c++] = Math.max(0, Math.min(1, b1));
+			lineColors[c++] = Math.max(0, Math.min(1, r2)); 
+			lineColors[c++] = Math.max(0, Math.min(1, g2)); 
+			lineColors[c++] = Math.max(0, Math.min(1, b2));
 			p += 6;
 		}
 		// push updated positions and colors
@@ -228,7 +469,9 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 		updateColorsAndKnob();
 		scene.rotation.x = -0.9;
 		renderer.render(scene, camera);
-		if (elapsed < maxRippleDuration) {
+		// Continua l'animazione se c'è un ripple attivo O se c'è animazione della densità
+		const hasDensityAnimation = densityCornerWeight > 0;
+		if (elapsed < maxRippleDuration || hasDensityAnimation) {
 			animId = requestAnimationFrame(animate) as any as number;
 		} else {
 			animId = null;
@@ -310,7 +553,7 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 		if (!hasArrow) { kbAnimId = null; return; }
 		const dt = Math.max(0, Math.min(0.05, (ts - kbLastTs) / 1000));
 		kbLastTs = ts;
-		const speed = kbPressed.has('Shift') ? 0.25 : 0.7; // units per second
+		const speed = kbPressed.has('Shift') ? shiftSpeed : normalSpeed; // units per second
 		let dx = 0, dy = 0;
 		if (kbPressed.has('ArrowLeft')) dx -= 1;
 		if (kbPressed.has('ArrowRight')) dx += 1;
@@ -374,7 +617,40 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 	updateColorsAndKnob();
 	renderOnce();
 
-	return { setPosition, getPosition, onChange, setCornerLabels };
+	function setSpeed(normal: number, shift: number) {
+		normalSpeed = Math.max(0.01, Math.min(2.0, normal));
+		shiftSpeed = Math.max(0.01, Math.min(1.0, shift));
+	}
+
+	function setReverbMix(mix: number) {
+		reverbMix = Math.max(0, Math.min(1, mix));
+		// Aggiorna i simboli quando cambia il riverbero
+		updateColorsAndKnob();
+		renderOnce();
+	}
+
+	function setFilterCutoff(cutoff: number, cornerWeight: number) {
+		filterCutoffHz = Math.max(200, Math.min(12000, cutoff));
+		cutoffCornerWeight = Math.max(0, Math.min(1, cornerWeight));
+		// Aggiorna i colori quando cambia il cutoff
+		updateColorsAndKnob();
+		renderOnce();
+	}
+
+	function setDensity(dens: number, cornerWeight: number) {
+		density = Math.max(1, Math.min(60, dens));
+		densityCornerWeight = Math.max(0, Math.min(1, cornerWeight));
+		// Aggiorna l'animazione quando cambia la densità
+		updateColorsAndKnob();
+		// Se l'animazione non è già attiva, avviala per mostrare l'effetto della densità
+		if (!animating && densityCornerWeight > 0) {
+			animating = true;
+			animate();
+		}
+		renderOnce();
+	}
+
+	return { setPosition, getPosition, onChange, setCornerLabels, setSpeed, setReverbMix, setFilterCutoff, setDensity };
 }
 
 

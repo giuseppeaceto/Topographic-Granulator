@@ -21,8 +21,8 @@ export const PARAMS: ParamMeta[] = [
 	{ id: 'delayMix', label: 'Delay Mix', min: 0, max: 1, kind: 'fx' },
 	{ id: 'reverbMix', label: 'Reverb Mix', min: 0, max: 1, kind: 'fx' },
 	{ id: 'masterGain', label: 'Master Gain', min: 0, max: 1.5, kind: 'fx' },
-	// normalized 0..1 along timeline (0 = inizio, 1 = fine possibile in base alla lunghezza della selezione)
-	{ id: 'selectionPos', label: 'Posizione selezione', min: 0, max: 1, kind: 'selection' }
+	// normalized 0..1 along timeline (0 = start, 1 = end possible based on selection length)
+	{ id: 'selectionPos', label: 'Selection Position', min: 0, max: 1, kind: 'selection' }
 ];
 
 

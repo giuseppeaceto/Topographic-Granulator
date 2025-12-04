@@ -1,4 +1,5 @@
 import { createAudioContextManager } from './modules/audio/AudioContextManager';
+import { createAudioRecorder } from './modules/audio/AudioRecorder';
 import { loadAudioBuffer } from './modules/utils/audioLoader';
 import { createRegionStore, type Region } from './modules/editor/RegionStore';
 import { createEffectsChain, type EffectsChain } from './modules/effects/EffectsChain';
@@ -12,6 +13,8 @@ import { MidiManager, type MidiMapping, loadMappings, saveMappings } from './mod
 import { createPadParamStore } from './modules/editor/PadParamStore';
 import type { GranularParams } from './modules/granular/GranularWorkletEngine';
 import type { EffectsParams } from './modules/effects/EffectsChain';
+import { createFloatingPanelManager } from './modules/ui/FloatingPanelManager';
+import { createCustomSelect, type SelectOption } from './modules/ui/CustomSelect';
 
 type AppState = {
 	contextMgr: ReturnType<typeof createAudioContextManager>;
@@ -22,6 +25,8 @@ type AppState = {
 	activePadIndex: number | null;
 	padParams: ReturnType<typeof createPadParamStore>;
 	recallPerPad: boolean;
+	recorder: ReturnType<typeof createAudioRecorder> | null;
+	recordingTimer: number | null;
 	midi: {
 		manager: MidiManager | null;
 		mappings: MidiMapping[];
@@ -39,6 +44,8 @@ const state: AppState = {
 	activePadIndex: null,
 	padParams: createPadParamStore(8),
 	recallPerPad: true,
+	recorder: null,
+	recordingTimer: null,
 	midi: { manager: null, mappings: loadMappings(), learnEnabled: false, pendingTarget: null }
 };
 
@@ -61,10 +68,56 @@ const xyCanvas = document.getElementById('xyPad') as HTMLCanvasElement;
 const xy = createXYPadThree(xyCanvas);
 const xyModeParamsBtn = document.getElementById('xyModeParams') as HTMLButtonElement | null;
 const xyModePadsBtn = document.getElementById('xyModePads') as HTMLButtonElement | null;
-const cornerTL = document.getElementById('xyCornerTL') as HTMLSelectElement;
-const cornerTR = document.getElementById('xyCornerTR') as HTMLSelectElement;
-const cornerBL = document.getElementById('xyCornerBL') as HTMLSelectElement;
-const cornerBR = document.getElementById('xyCornerBR') as HTMLSelectElement;
+const cornerTL = document.getElementById('xyCornerTL') as HTMLElement;
+const cornerTR = document.getElementById('xyCornerTR') as HTMLElement;
+const cornerBL = document.getElementById('xyCornerBL') as HTMLElement;
+const cornerBR = document.getElementById('xyCornerBR') as HTMLElement;
+const recordBtn = document.getElementById('recordBtn') as HTMLButtonElement;
+const recordVideoBtn = document.getElementById('recordVideoBtn') as HTMLButtonElement;
+const stopRecordBtn = document.getElementById('stopRecordBtn') as HTMLButtonElement;
+const recordStatusEl = document.getElementById('recordStatus') as HTMLElement;
+
+// Initialize Floating Panel Manager
+const panelManager = createFloatingPanelManager();
+
+// Register floating panels with default positions
+const waveformPanel = document.getElementById('panel-waveform') as HTMLElement;
+const parametersPanel = document.getElementById('panel-parameters') as HTMLElement;
+const effectsPanel = document.getElementById('panel-effects') as HTMLElement;
+
+if (waveformPanel) {
+	panelManager.registerPanel({
+		id: 'waveform',
+		element: waveformPanel,
+		defaultPosition: { x: 20, y: 20 },
+		defaultSize: { width: 500, height: 400 },
+		minSize: { width: 350, height: 250 },
+		resizable: true
+	});
+}
+
+if (parametersPanel) {
+	panelManager.registerPanel({
+		id: 'parameters',
+		element: parametersPanel,
+		defaultPosition: { x: window.innerWidth - 300, y: 420 },
+		defaultSize: { width: 260, height: 280 },
+		minSize: { width: 240, height: 260 },
+		resizable: true
+	});
+}
+
+if (effectsPanel) {
+	panelManager.registerPanel({
+		id: 'effects',
+		element: effectsPanel,
+		defaultPosition: { x: window.innerWidth - 300, y: 20 },
+		defaultSize: { width: 260, height: 400 },
+		minSize: { width: 240, height: 380 },
+		resizable: true
+	});
+}
+
 // Helper to get current XY mode
 let currentXYMode: 'params' | 'pads' = 'params';
 function getXYMode(): 'params' | 'pads' {
@@ -112,7 +165,114 @@ waveform.onSelection((sel) => {
 
 unlockBtn.addEventListener('click', async () => {
 	await state.contextMgr.unlock();
-	unlockBtn.textContent = 'Audio Sbloccato';
+	unlockBtn.textContent = 'Audio Unlocked';
+});
+
+// ---------- Audio/Video Recording ----------
+let isVideoRecording = false;
+
+function updateRecordingUI() {
+	if (!state.recorder) return;
+	const isRecording = state.recorder.isRecording();
+	recordBtn.disabled = isRecording;
+	recordVideoBtn.disabled = isRecording;
+	stopRecordBtn.disabled = !isRecording;
+	if (isRecording) {
+		const duration = state.recorder.getDuration();
+		const mins = Math.floor(duration / 60);
+		const secs = Math.floor(duration % 60);
+		const mode = isVideoRecording ? 'Video' : 'Audio';
+		recordStatusEl.textContent = `● Recording ${mode}: ${mins}:${secs.toString().padStart(2, '0')}`;
+	} else {
+		recordStatusEl.textContent = '';
+		isVideoRecording = false;
+	}
+}
+
+recordBtn.addEventListener('click', async () => {
+	ensureEffects();
+	if (!state.recorder) return;
+	try {
+		await state.recorder.start(false); // Audio only
+		isVideoRecording = false;
+		updateRecordingUI();
+		// Update UI every second
+		state.recordingTimer = setInterval(() => {
+			updateRecordingUI();
+		}, 1000) as any as number;
+	} catch (error) {
+		console.error('Error starting recording:', error);
+		recordStatusEl.textContent = 'Error starting recording';
+	}
+});
+
+recordVideoBtn.addEventListener('click', async () => {
+	ensureEffects();
+	if (!state.recorder) return;
+	try {
+		await state.recorder.start(true); // Video + Audio
+		isVideoRecording = true;
+		updateRecordingUI();
+		// Update UI every second
+		state.recordingTimer = setInterval(() => {
+			updateRecordingUI();
+		}, 1000) as any as number;
+	} catch (error) {
+		console.error('Error starting video recording:', error);
+		recordStatusEl.textContent = 'Error starting video recording';
+		setTimeout(() => {
+			recordStatusEl.textContent = '';
+		}, 3000);
+	}
+});
+
+stopRecordBtn.addEventListener('click', async () => {
+	if (!state.recorder) return;
+	const blob = await state.recorder.stop();
+	if (state.recordingTimer) {
+		clearInterval(state.recordingTimer);
+		state.recordingTimer = null;
+	}
+	updateRecordingUI();
+	if (blob) {
+		// Create download link
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+		
+		// Determine extension and type from blob MIME type
+		let extension = 'wav';
+		let type = 'audio';
+		
+		if (blob.type.startsWith('video/')) {
+			type = 'video';
+			if (blob.type.includes('mp4')) {
+				extension = 'mp4';
+			} else if (blob.type.includes('webm')) {
+				extension = 'webm';
+			} else {
+				extension = 'webm'; // fallback
+			}
+		} else if (blob.type.startsWith('audio/')) {
+			type = 'audio';
+			if (blob.type.includes('wav')) {
+				extension = 'wav';
+			} else {
+				extension = 'wav'; // fallback
+			}
+		}
+		
+		a.href = url;
+		a.download = `undergrain-${type}-${timestamp}.${extension}`;
+		document.body.appendChild(a);
+		a.click();
+		document.body.removeChild(a);
+		URL.revokeObjectURL(url);
+		recordStatusEl.textContent = `✓ ${type} recording saved`;
+		setTimeout(() => {
+			recordStatusEl.textContent = '';
+		}, 3000);
+	}
 });
 
 if (recallPerPadEl) {
@@ -131,10 +291,10 @@ if (clearSelectionBtn) {
 			updatePadGrid();
 			// Update XY pad dropdowns if in pad mode
 			if (getXYMode() === 'pads') {
-				populateParamSelect(cornerTL);
-				populateParamSelect(cornerTR);
-				populateParamSelect(cornerBL);
-				populateParamSelect(cornerBR);
+				populateParamSelect(customSelectTL);
+				populateParamSelect(customSelectTR);
+				populateParamSelect(customSelectBL);
+				populateParamSelect(customSelectBR);
 				refreshXYCornerLabels();
 			}
 		}
@@ -217,8 +377,8 @@ if (midiLearnEl) {
 		if (state.midi.learnEnabled && !state.midi.manager) {
 			const ok = await initMIDI();
 			if (!ok) {
-				console.warn('Web MIDI non disponibile o permesso non concesso.');
-				alert('Impossibile attivare il MIDI. Controlla il permesso del browser e riprova (Chrome/Edge).');
+				console.warn('Web MIDI not available or permission not granted.');
+				alert('Unable to enable MIDI. Check browser permission and try again (Chrome/Edge).');
 				midiLearnEl.checked = false;
 				state.midi.learnEnabled = false;
 			}
@@ -308,7 +468,7 @@ fileInput.addEventListener('change', async (e) => {
 	ensureEffects();
 	updatePadGrid();
 	waveform.setBuffer(audioBuffer);
-	bufferDurEl.textContent = `Durata: ${audioBuffer.duration.toFixed(2)}s`;
+	bufferDurEl.textContent = `Duration: ${audioBuffer.duration.toFixed(2)}s`;
 	updateSelPosUI();
 	if (state.engine) {
 		await state.engine.setBuffer(audioBuffer);
@@ -332,7 +492,7 @@ function ensureEngine() {
 				state.engine.setRegion(0, state.buffer.duration);
 			}
 		}).catch((err) => {
-			console.error('Errore Worklet:', err);
+			console.error('Worklet error:', err);
 		});
 	}
 }
@@ -342,6 +502,10 @@ function ensureEffects() {
 		state.effects = createEffectsChain(state.contextMgr.audioContext);
 		state.engine?.connect(state.effects.input);
 		state.effects.output.connect(state.contextMgr.audioContext.destination);
+	}
+	// Initialize or update recorder when effects are ready
+	if (state.effects && !state.recorder) {
+		state.recorder = createAudioRecorder(state.contextMgr.audioContext, state.effects.output);
 	}
 }
 
@@ -398,7 +562,7 @@ function updatePadGrid() {
 		// assign current waveform selection
 		const sel = waveform.getSelection();
 		if (sel) {
-			const name = prompt('Nome (opzionale):', state.regions.get(index)?.name ?? '') ?? '';
+			const name = prompt('Name (optional):', state.regions.get(index)?.name ?? '') ?? '';
 			const region = { start: sel.start, end: sel.end, name: name || undefined };
 			state.regions.set(index, region);
 			// ensure waveform reflects what we just assigned
@@ -484,6 +648,12 @@ function recallPadParams(index: number, durationMs = 300) {
 		// engine/effects
 		state.engine?.setParams(interpG);
 		state.effects?.setParams(interpFx);
+		// Sincronizza il riverbero con l'XYPad durante l'interpolazione
+		xy.setReverbMix?.(interpFx.reverbMix);
+		// Sincronizza il filtro cutoff con l'XYPad durante l'interpolazione
+		xy.setFilterCutoff?.(interpFx.filterCutoffHz, 0);
+		// Sincronizza la densità con l'XYPad durante l'interpolazione
+		xy.setDensity?.(interpG.density, 0);
 		// UI
 		controls.setGranularUI(interpG);
 		controls.setFxUI(interpFx);
@@ -543,53 +713,85 @@ function recallWaveformSelection(index: number) {
 }
 
 // ---------- XY Pad wiring ----------
-function populateParamSelect(select: HTMLSelectElement) {
-	const currentValue = select.value; // Save current selection
-	select.innerHTML = '';
+let customSelectTL: ReturnType<typeof createCustomSelect> | null = null;
+let customSelectTR: ReturnType<typeof createCustomSelect> | null = null;
+let customSelectBL: ReturnType<typeof createCustomSelect> | null = null;
+let customSelectBR: ReturnType<typeof createCustomSelect> | null = null;
+
+function getParamOptions(): SelectOption[] {
 	const mode = getXYMode();
 	if (mode === 'pads') {
-		// Show only pads that have a saved region
 		const padCount = state.regions.getAll().length;
-		const savedPadIndices: number[] = [];
+		const options: SelectOption[] = [];
 		for (let i = 0; i < padCount; i++) {
 			const r = state.regions.get(i);
-			if (r) { // Only add pads with saved regions
-				const opt = document.createElement('option');
-				opt.value = `pad:${i}`;
+			if (r) {
 				const name = r.name ? ` – ${r.name}` : '';
-				opt.textContent = `Pad ${i + 1}${name}`;
-				select.appendChild(opt);
-				savedPadIndices.push(i);
+				options.push({
+					value: `pad:${i}`,
+					label: `Pad ${i + 1}${name}`
+				});
 			}
 		}
-		// If current value is no longer valid, set to first available pad
-		if (currentValue && !savedPadIndices.some(idx => `pad:${idx}` === currentValue)) {
-			if (savedPadIndices.length > 0) {
-				select.value = `pad:${savedPadIndices[0]}`;
-			}
-		}
+		return options;
 	} else {
-		for (const p of PARAMS) {
-			const opt = document.createElement('option');
-			opt.value = p.id;
-			opt.textContent = p.label;
-			select.appendChild(opt);
-		}
-		// Restore previous value if it exists
-		if (currentValue && Array.from(select.options).some(opt => opt.value === currentValue)) {
-			select.value = currentValue;
-		}
+		return PARAMS.map(p => ({
+			value: p.id,
+			label: p.label
+		}));
 	}
 }
-populateParamSelect(cornerTL);
-populateParamSelect(cornerTR);
-populateParamSelect(cornerBL);
-populateParamSelect(cornerBR);
-// defaults
-cornerTL.value = 'filterCutoffHz';
-cornerTR.value = 'density';
-cornerBL.value = 'reverbMix';
-cornerBR.value = 'pitchSemitones';
+
+function populateParamSelect(select: ReturnType<typeof createCustomSelect> | null) {
+	if (!select) return;
+	const currentValue = select.getValue();
+	const options = getParamOptions();
+	select.setOptions(options);
+	
+	// Restore previous value if it exists, otherwise use first option
+	if (currentValue && options.some(opt => opt.value === currentValue)) {
+		select.setValue(currentValue);
+	} else if (options.length > 0) {
+		select.setValue(options[0].value);
+	}
+}
+
+// Initialize custom selects
+customSelectTL = createCustomSelect({
+	element: cornerTL,
+	options: getParamOptions(),
+	value: 'filterCutoffHz',
+	onChange: (value) => {
+		refreshXYCornerLabels();
+	}
+});
+
+customSelectTR = createCustomSelect({
+	element: cornerTR,
+	options: getParamOptions(),
+	value: 'density',
+	onChange: (value) => {
+		refreshXYCornerLabels();
+	}
+});
+
+customSelectBL = createCustomSelect({
+	element: cornerBL,
+	options: getParamOptions(),
+	value: 'reverbMix',
+	onChange: (value) => {
+		refreshXYCornerLabels();
+	}
+});
+
+customSelectBR = createCustomSelect({
+	element: cornerBR,
+	options: getParamOptions(),
+	value: 'pitchSemitones',
+	onChange: (value) => {
+		refreshXYCornerLabels();
+	}
+});
 
 let xyBaseGranular: GranularParams | null = null;
 let xyBaseFx: EffectsParams | null = null;
@@ -604,33 +806,54 @@ function refreshXYCornerLabels() {
 			return r?.name ? `Pad ${idx + 1} – ${r.name}` : `Pad ${idx + 1}`;
 		};
 		xy.setCornerLabels({
-			tl: label(cornerTL.value),
-			tr: label(cornerTR.value),
-			bl: label(cornerBL.value),
-			br: label(cornerBR.value)
+			tl: label(customSelectTL?.getValue() || ''),
+			tr: label(customSelectTR?.getValue() || ''),
+			bl: label(customSelectBL?.getValue() || ''),
+			br: label(customSelectBR?.getValue() || '')
 		});
+		// In modalità pads, resetta tutti gli effetti visivi
+		xy.setReverbMix?.(0);
+		xy.setFilterCutoff?.(4000, 0);
+		xy.setDensity?.(15, 0);
 	} else {
 		const label = (id: string) => PARAMS.find(p => p.id === (id as ParamId))?.label ?? '';
 		xy.setCornerLabels({
-			tl: label(cornerTL.value),
-			tr: label(cornerTR.value),
-			bl: label(cornerBL.value),
-			br: label(cornerBR.value)
+			tl: label(customSelectTL?.getValue() || ''),
+			tr: label(customSelectTR?.getValue() || ''),
+			bl: label(customSelectBL?.getValue() || ''),
+			br: label(customSelectBR?.getValue() || '')
 		});
+		// Verifica quali parametri sono attualmente associati ai vertici
+		const currentParams = new Set<ParamId>();
+		const tl = customSelectTL?.getValue() as ParamId;
+		const tr = customSelectTR?.getValue() as ParamId;
+		const bl = customSelectBL?.getValue() as ParamId;
+		const br = customSelectBR?.getValue() as ParamId;
+		if (tl) currentParams.add(tl);
+		if (tr) currentParams.add(tr);
+		if (bl) currentParams.add(bl);
+		if (br) currentParams.add(br);
+		
+		// Resetta gli effetti per i parametri che non sono più associati
+		if (!currentParams.has('reverbMix')) {
+			xy.setReverbMix?.(0);
+		}
+		if (!currentParams.has('filterCutoffHz')) {
+			xy.setFilterCutoff?.(4000, 0);
+		}
+		if (!currentParams.has('density')) {
+			xy.setDensity?.(15, 0);
+		}
 	}
 }
-cornerTL.addEventListener('change', refreshXYCornerLabels);
-cornerTR.addEventListener('change', refreshXYCornerLabels);
-cornerBL.addEventListener('change', refreshXYCornerLabels);
-cornerBR.addEventListener('change', refreshXYCornerLabels);
 refreshXYCornerLabels();
 // react to mode changes
 function handleXYModeChange(mode: 'params' | 'pads') {
 	setXYMode(mode);
-	populateParamSelect(cornerTL);
-	populateParamSelect(cornerTR);
-	populateParamSelect(cornerBL);
-	populateParamSelect(cornerBR);
+	populateParamSelect(customSelectTL);
+	populateParamSelect(customSelectTR);
+	populateParamSelect(customSelectBL);
+	populateParamSelect(customSelectBR);
 	if (mode === 'pads') {
 		// Find first 4 saved pads and use them as defaults
 		const savedPads: number[] = [];
@@ -647,15 +870,15 @@ function handleXYModeChange(mode: 'params' | 'pads') {
 			savedPads[2] ?? savedPads[savedPads.length - 1] ?? 0,
 			savedPads[3] ?? savedPads[savedPads.length - 1] ?? 0
 		];
-		cornerTL.value = `pad:${defaults[0]}`;
-		cornerTR.value = `pad:${defaults[1]}`;
-		cornerBL.value = `pad:${defaults[2]}`;
-		cornerBR.value = `pad:${defaults[3]}`;
+		customSelectTL?.setValue(`pad:${defaults[0]}`);
+		customSelectTR?.setValue(`pad:${defaults[1]}`);
+		customSelectBL?.setValue(`pad:${defaults[2]}`);
+		customSelectBR?.setValue(`pad:${defaults[3]}`);
 	} else {
-		cornerTL.value = 'filterCutoffHz';
-		cornerTR.value = 'density';
-		cornerBL.value = 'reverbMix';
-		cornerBR.value = 'pitchSemitones';
+		customSelectTL?.setValue('filterCutoffHz');
+		customSelectTR?.setValue('density');
+		customSelectBL?.setValue('reverbMix');
+		customSelectBR?.setValue('pitchSemitones');
 	}
 	refreshXYCornerLabels();
 }
@@ -666,7 +889,7 @@ setXYMode('params');
 
 // ---------- Param tiles (knobs) ----------
 type KnobConfig = {
-	id: 'pitch' | 'density' | 'grain' | 'rand' | 'selpos' | 'filter' | 'res' | 'dtime' | 'dmix' | 'reverb' | 'gain';
+	id: 'pitch' | 'density' | 'grain' | 'rand' | 'selpos' | 'filter' | 'res' | 'dtime' | 'dmix' | 'reverb' | 'gain' | 'xyspeed' | 'xyshift';
 	min: number; max: number; step: number;
 	get: () => number;
 	set: (v: number) => void;
@@ -693,6 +916,8 @@ const knobConfigs: KnobConfig[] = [
 			state.engine?.setParams(p);
 			if (state.activePadIndex != null) state.padParams.setGranular(state.activePadIndex, p);
 			controls.setGranularUI(p);
+			// Aggiorna l'animazione della griglia quando cambia la densità (peso 0 perché non viene da XYPad)
+			xy.setDensity?.(p.density, 0);
 		},
 		format: (v) => String(Math.round(v))
 	},
@@ -748,6 +973,8 @@ const knobConfigs: KnobConfig[] = [
 			state.effects?.setParams(fx);
 			if (state.activePadIndex != null) state.padParams.setEffects(state.activePadIndex, fx);
 			controls.setFxUI(fx);
+			// Aggiorna il colore ciano quando cambia il filtro cutoff (peso 0 perché non viene da XYPad)
+			xy.setFilterCutoff?.(fx.filterCutoffHz, 0);
 		},
 		format: (v) => String(Math.round(v))
 	},
@@ -791,6 +1018,8 @@ const knobConfigs: KnobConfig[] = [
 			state.effects?.setParams(fx);
 			if (state.activePadIndex != null) state.padParams.setEffects(state.activePadIndex, fx);
 			controls.setFxUI(fx);
+			// Aggiorna il numero di simboli nell'XYPad in base al riverbero
+			xy.setReverbMix?.(v);
 		},
 		format: (v) => (Math.round(v * 100) / 100).toFixed(2)
 	},
@@ -802,6 +1031,26 @@ const knobConfigs: KnobConfig[] = [
 			state.effects?.setParams(fx);
 			if (state.activePadIndex != null) state.padParams.setEffects(state.activePadIndex, fx);
 			controls.setFxUI(fx);
+		},
+		format: (v) => (Math.round(v * 100) / 100).toFixed(2)
+	},
+	{
+		id: 'xyspeed', min: 0.01, max: 2.0, step: 0.01,
+		get: () => 0.15, // Default value, will be updated by knob
+		set: (v) => {
+			const normal = Math.max(0.01, Math.min(2.0, v));
+			const shift = knobConfigs.find(k => k.id === 'xyshift')?.get() ?? 0.05;
+			xy.setSpeed?.(normal, shift);
+		},
+		format: (v) => (Math.round(v * 100) / 100).toFixed(2)
+	},
+	{
+		id: 'xyshift', min: 0.01, max: 1.0, step: 0.01,
+		get: () => 0.05, // Default value, will be updated by knob
+		set: (v) => {
+			const shift = Math.max(0.01, Math.min(1.0, v));
+			const normal = knobConfigs.find(k => k.id === 'xyspeed')?.get() ?? 0.15;
+			xy.setSpeed?.(normal, shift);
 		},
 		format: (v) => (Math.round(v * 100) / 100).toFixed(2)
 	}
@@ -882,12 +1131,27 @@ function refreshParamTilesFromState() {
 }
 
 initParamTiles();
+// Initialize XY Pad speeds
+xy.setSpeed?.(0.15, 0.05);
+// Sincronizza il valore iniziale del riverbero, filtro cutoff e densità
+if (state.activePadIndex != null) {
+	const pad = state.padParams.get(state.activePadIndex);
+	xy.setReverbMix?.(pad.effects.reverbMix);
+	xy.setFilterCutoff?.(pad.effects.filterCutoffHz, 0);
+	xy.setDensity?.(pad.granular.density, 0);
+}
 function snapshotBaseFromCurrentPad() {
 	// snapshot current pad parameters as base
 	if (state.activePadIndex == null) return;
 	const pad = state.padParams.get(state.activePadIndex);
 	xyBaseGranular = { ...pad.granular };
 	xyBaseFx = { ...pad.effects };
+	// Sincronizza il riverbero con l'XYPad per controllare i simboli
+	xy.setReverbMix?.(pad.effects.reverbMix);
+	// Sincronizza il filtro cutoff con l'XYPad per controllare il colore ciano
+	xy.setFilterCutoff?.(pad.effects.filterCutoffHz, 0);
+	// Sincronizza la densità con l'XYPad per controllare l'animazione della griglia
+	xy.setDensity?.(pad.granular.density, 0);
 	// snapshot current selection position (normalized)
 	const sel = waveform.getSelection();
 	if (sel && state.buffer) {
@@ -914,10 +1178,10 @@ xy.onChange((pos) => {
 		// Mix between pads' stored parameters (always read from original pad values)
 		const idxOf = (v: string) => Number(v.split(':')[1] ?? '0') || 0;
 		const defs = [
-			{ idx: idxOf(cornerTL.value), w: wTL },
-			{ idx: idxOf(cornerTR.value), w: wTR },
-			{ idx: idxOf(cornerBL.value), w: wBL },
-			{ idx: idxOf(cornerBR.value), w: wBR }
+			{ idx: idxOf(customSelectTL?.getValue() || ''), w: wTL },
+			{ idx: idxOf(customSelectTR?.getValue() || ''), w: wTR },
+			{ idx: idxOf(customSelectBL?.getValue() || ''), w: wBL },
+			{ idx: idxOf(customSelectBR?.getValue() || ''), w: wBR }
 		];
 		// Sum weights for normalization (though weights sum to 1)
 		const sumW = defs.reduce((s, d) => s + d.w, 0) || 1;
@@ -942,6 +1206,18 @@ xy.onChange((pos) => {
 		// Apply interpolated values to engine/effects/UI (but DO NOT save to pads)
 		state.engine?.setParams(g);
 		state.effects?.setParams(f);
+		// Aggiorna il numero di simboli nell'XYPad se cambia il reverbMix
+		if (f.reverbMix != null) {
+			xy.setReverbMix?.(f.reverbMix);
+		}
+		// Aggiorna il colore ciano se cambia il filtro cutoff (in modalità pads il peso è 0)
+		if (f.filterCutoffHz != null) {
+			xy.setFilterCutoff?.(f.filterCutoffHz, 0);
+		}
+		// Aggiorna l'animazione della griglia se cambia la densità (in modalità pads il peso è 0)
+		if (g.density != null) {
+			xy.setDensity?.(g.density, 0);
+		}
 		controls.setGranularUI(g);
 		controls.setFxUI(f);
 		// Interpolate selection (region) start/end if available
@@ -1011,10 +1287,10 @@ xy.onChange((pos) => {
 	if (xyBaseGranular == null || xyBaseFx == null) snapshotBaseFromCurrentPad();
 	if (!xyBaseGranular || !xyBaseFx) return;
 	const cornerDefs = [
-		{ id: cornerTL.value as ParamId, weight: wTL },
-		{ id: cornerTR.value as ParamId, weight: wTR },
-		{ id: cornerBL.value as ParamId, weight: wBL },
-		{ id: cornerBR.value as ParamId, weight: wBR }
+		{ id: (customSelectTL?.getValue() || '') as ParamId, weight: wTL },
+		{ id: (customSelectTR?.getValue() || '') as ParamId, weight: wTR },
+		{ id: (customSelectBL?.getValue() || '') as ParamId, weight: wBL },
+		{ id: (customSelectBR?.getValue() || '') as ParamId, weight: wBR }
 	];
 	const influenceMap = new Map<ParamId, number>();
 	for (const c of cornerDefs) {
@@ -1053,11 +1329,27 @@ xy.onChange((pos) => {
 		state.engine?.setParams(granularUpdate);
 		controls.setGranularUI(granularUpdate);
 		if (state.activePadIndex != null) state.padParams.setGranular(state.activePadIndex, granularUpdate);
+		// Aggiorna l'animazione della griglia se cambia la densità
+		if (granularUpdate.density != null) {
+			// Trova il peso del vertice TR per la densità
+			const densityWeight = influenceMap.get('density') ?? 0;
+			xy.setDensity?.(granularUpdate.density, densityWeight);
+		}
 	}
 	if (Object.keys(fxUpdate).length) {
 		state.effects?.setParams(fxUpdate);
 		controls.setFxUI(fxUpdate);
 		if (state.activePadIndex != null) state.padParams.setEffects(state.activePadIndex, fxUpdate);
+		// Aggiorna il numero di simboli nell'XYPad se cambia il reverbMix
+		if (fxUpdate.reverbMix != null) {
+			xy.setReverbMix?.(fxUpdate.reverbMix);
+		}
+		// Aggiorna il colore ciano se cambia il filtro cutoff
+		if (fxUpdate.filterCutoffHz != null) {
+			// Trova il peso del vertice TL per il filtro cutoff
+			const cutoffWeight = influenceMap.get('filterCutoffHz') ?? 0;
+			xy.setFilterCutoff?.(fxUpdate.filterCutoffHz, cutoffWeight);
+		}
 	}
 	refreshParamTilesFromState();
 });

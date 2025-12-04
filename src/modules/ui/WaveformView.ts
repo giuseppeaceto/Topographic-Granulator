@@ -66,19 +66,35 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 
 		if (!buffer) {
 			ctx2d.fillStyle = '#57607a';
-			ctx2d.fillText('Carica un file audio…', 12, 20);
+			ctx2d.fillText('Load an audio file…', 12, 20);
 			return;
 		}
 
-		// waveform (mono mix)
+		// waveform (mono mix) - improved visibility with filled shape
 		const samples = resampleForDraw(buffer, w);
-		ctx2d.strokeStyle = '#b3b3b3';
-		ctx2d.lineWidth = 1;
-		ctx2d.beginPath();
 		const mid = h / 2;
+		const verticalScale = h * 0.9; // Increased from 0.45 to 0.9 for better visibility
+		
+		// Draw filled waveform shape for better visibility
+		ctx2d.fillStyle = 'rgba(179, 179, 179, 0.3)';
+		ctx2d.beginPath();
+		ctx2d.moveTo(0, mid);
 		for (let x = 0; x < w; x++) {
 			const v = samples[x] || 0;
-			const y = mid - v * (h * 0.45);
+			const y = mid - v * verticalScale;
+			ctx2d.lineTo(x, y);
+		}
+		ctx2d.lineTo(w, mid);
+		ctx2d.closePath();
+		ctx2d.fill();
+		
+		// Draw waveform outline
+		ctx2d.strokeStyle = '#b3b3b3';
+		ctx2d.lineWidth = 1.5;
+		ctx2d.beginPath();
+		for (let x = 0; x < w; x++) {
+			const v = samples[x] || 0;
+			const y = mid - v * verticalScale;
 			if (x === 0) ctx2d.moveTo(x, y);
 			else ctx2d.lineTo(x, y);
 		}
@@ -252,15 +268,20 @@ function resampleForDraw(buffer: AudioBuffer, width: number): Float32Array {
 	for (let i = 0; i < width; i++) {
 		const start = Math.floor(i * block);
 		const end = Math.floor((i + 1) * block);
-		let acc = 0;
-		let n = 0;
+		let maxPeak = 0;
+		// Use peak detection instead of averaging to preserve dynamics
 		for (let j = start; j < end; j++) {
 			const v0 = ch0[j];
 			const v1 = ch1 ? ch1[j] : v0;
-			acc += 0.5 * (v0 + v1);
-			n++;
+			const mixed = 0.5 * (v0 + v1);
+			const peak = Math.abs(mixed);
+			if (peak > maxPeak) {
+				maxPeak = peak;
+			}
 		}
-		out[i] = n ? acc / n : 0;
+		// Preserve sign by using the original sign of the peak value
+		// For centered waveform display, use absolute peak value
+		out[i] = maxPeak;
 	}
 	return out;
 }

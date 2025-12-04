@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="it">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -8,40 +8,97 @@
   </head>
   <body>
     <div id="app">
-      
+      <!-- XY Pad - Large and centered -->
+      <main class="xy-pad-container">
+        <div class="xy-pad-wrapper">
+          <div class="xy-header">
+            <div class="app-header-section">
+              <img src="/images/logo.png" alt="Logo" class="logo-icon" />
+              <div class="app-header-text">
+                <h2 class="app-logo">
+                  <span class="logo-text">Undergrain</span>
+                </h2>
+                <p class="app-subtitle">topographic granulator</p>
+              </div>
+            </div>
+            <div class="xy-controls-top">
+              <div class="control-group">
+                <label style="grid-template-columns:auto auto auto 1fr;gap:8px;align-items:center;">
+                  <span>Mode</span>
+                  <button id="xyModeParams" class="xy-mode-btn active" data-mode="params" title="Single parameters" aria-label="Single parameters">
+                    <span class="xy-mode-icon">▬</span>
+                  </button>
+                  <button id="xyModePads" class="xy-mode-btn" data-mode="pads" title="Pad" aria-label="Pad">
+                    <span class="xy-mode-icon">▦</span>
+                  </button>
+                </label>
+              </div>
+              <span class="xy-hint">Arrow keys ← ↑ → ↓ to move</span>
+            </div>
+            <div class="xy-assign">
+              <div class="xy-assign-row">
+                <label>
+                  <div id="xyCornerTL" aria-label="Top left corner"></div>
+                </label>
+                <label>
+                  <div id="xyCornerTR" aria-label="Top right corner"></div>
+                </label>
+              </div>
+              <canvas id="xyPad" width="800" height="800"></canvas>
+              <div class="xy-assign-row">
+                <label>
+                  <div id="xyCornerBL" aria-label="Bottom left corner"></div>
+                </label>
+                <label>
+                  <div id="xyCornerBR" aria-label="Bottom right corner"></div>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
 
-      <main class="app-main app-main-3col">
-        <section class="pads">
-          <div class="app-header-section">
-            <h2 class="app-logo">
-              <span class="logo-icon">◉</span>
-              <span class="logo-text">Undergrain</span>
-            </h2>
-            <p class="app-subtitle">topographic granulator</p>
-          </div>
-          <div class="file-loader" style="margin-bottom:8px;">
-            <input id="fileInput" type="file" accept="audio/*" class="visually-hidden" />
-            <label for="fileInput" class="btn">Choose file</label>
-            <button id="unlockBtn" class="btn" title="Sblocca AudioContext">Unlock audio</button>
-            <span id="fileName" class="filename" aria-live="polite"></span>
-          </div>
+      <!-- Floating Panel: Waveform & Pads -->
+      <div id="panel-waveform" class="floating-panel" data-panel-id="waveform">
+        <div class="panel-header">
+          <h2>Waveform & Pads</h2>
+        </div>
+        <div class="panel-content">
           <div class="waveform-wrap">
             <canvas id="waveform" width="1200" height="160"></canvas>
             <div class="waveform-meta">
-              <span>Selezione: <span id="selStart">0.00</span>s – <span id="selEnd">0.00</span>s</span>
+              <span>Selection: <span id="selStart">0.00</span>s – <span id="selEnd">0.00</span>s</span>
               <span id="bufferDur" style="opacity:.8"></span>
-              <button id="clearSelectionBtn" class="btn-icon" title="Cancella selezione">✕</button>
+              <button id="clearSelectionBtn" class="btn-icon" title="Clear selection">✕</button>
             </div>
           </div>
           <div id="padGrid" class="pad-grid"></div>
-          <h2 style="margin-top:12px;">Parametri</h2>
+          <div class="control-group" style="margin-top:12px;">
+            <span class="control-label">Move selection</span>
+            <div class="nudge-controls">
+              <button id="nudgeLeft" class="btn-icon" title="Move left">◀</button>
+              <button id="nudgeRight" class="btn-icon" title="Move right">▶</button>
+              <span class="nudge-step">
+                Step: <input id="nudgeStepMs" type="number" min="1" max="1000" value="20" class="nudge-input" /> ms
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Floating Panel: Parameters -->
+      <div id="panel-parameters" class="floating-panel" data-panel-id="parameters">
+        <div class="panel-header">
+          <h2>Parameters</h2>
+        </div>
+        <div class="panel-content">
           <div class="midi-toolbar">
             <label class="toggle-switch">
               <input type="checkbox" id="midiLearn" />
               <span class="toggle-slider"></span>
               <span class="toggle-label">MIDI Learn</span>
             </label>
-            <button id="midiClear" class="btn-icon" title="Rimuovi tutte le assegnazioni MIDI">✕</button>
+            <button id="midiClear" class="btn-icon" title="Remove all MIDI assignments">✕</button>
           </div>
           <div class="param-grid">
             <div class="param-tile" data-tile="pitch">
@@ -74,61 +131,18 @@
             <label class="toggle-switch">
               <input id="recallPerPad" type="checkbox" checked />
               <span class="toggle-slider"></span>
-              <span class="toggle-label">Memorizza e richiama i controlli per pad</span>
+              <span class="toggle-label">Store and recall controls per pad</span>
             </label>
           </div>
-          <div class="control-group">
-            <span class="control-label">Sposta selezione</span>
-            <div class="nudge-controls">
-              <button id="nudgeLeft" class="btn-icon" title="Sposta a sinistra">◀</button>
-              <button id="nudgeRight" class="btn-icon" title="Sposta a destra">▶</button>
-              <span class="nudge-step">
-                Step: <input id="nudgeStepMs" type="number" min="1" max="1000" value="20" class="nudge-input" /> ms
-              </span>
-            </div>
-          </div>
-        </section>
+        </div>
+      </div>
 
-        <section class="controls controls-mid">
-          <h2>XY Pad</h2>
-          <div class="xy-wrap">
-            <div class="xy-header">
-              <span class="xy-hint">Freccie ← ↑ → ↓ per muovere</span>
-            </div>
-            <div class="control-group" style="margin:6px 0 10px;">
-              <label style="grid-template-columns:auto auto auto 1fr;gap:8px;align-items:center;">
-                <span>Modalità</span>
-                <button id="xyModeParams" class="xy-mode-btn active" data-mode="params" title="Parametri singoli" aria-label="Parametri singoli">
-                  <span class="xy-mode-icon">▬</span>
-                </button>
-                <button id="xyModePads" class="xy-mode-btn" data-mode="pads" title="Pad" aria-label="Pad">
-                  <span class="xy-mode-icon">▦</span>
-                </button>
-              </label>
-            </div>
-            <div class="xy-assign">
-              <div class="xy-assign-row">
-                <label>
-                  <select id="xyCornerTL" aria-label="Corner alto sinistra"></select>
-                </label>
-                <label>
-                  <select id="xyCornerTR" aria-label="Corner alto destra"></select>
-                </label>
-              </div>
-              <canvas id="xyPad" width="260" height="260"></canvas>
-              <div class="xy-assign-row">
-                <label>
-                  <select id="xyCornerBL" aria-label="Corner basso sinistra"></select>
-                </label>
-                <label>
-                  <select id="xyCornerBR" aria-label="Corner basso destra"></select>
-                </label>
-              </div>
-            </div>
-          </div>
-        </section>
-        <section class="controls controls-right">
-          <h2>Effetti</h2>
+      <!-- Floating Panel: Effects -->
+      <div id="panel-effects" class="floating-panel" data-panel-id="effects">
+        <div class="panel-header">
+          <h2>Effects</h2>
+        </div>
+        <div class="panel-content">
           <div class="param-grid">
             <div class="param-tile" data-tile="filter">
               <div class="tile-header">FILTER</div>
@@ -161,10 +175,43 @@
               <div class="tile-value" data-val="gain">0.9</div>
             </div>
           </div>
-        </section>
-      </main>
-      <footer class="app-footer">
-        <small>Carica un audio, seleziona una regione e assegnala a un pad (clic lungo).</small>
+          <h2>XY Pad Speed</h2>
+          <div class="param-grid">
+            <div class="param-tile" data-tile="xyspeed">
+              <div class="tile-header">SPEED</div>
+              <div class="knob" data-knob="xyspeed"><span class="knob-dot"></span><span class="knob-plus">+</span></div>
+              <div class="tile-value" data-val="xyspeed">0.15</div>
+            </div>
+            <div class="param-tile" data-tile="xyshift">
+              <div class="tile-header">SHIFT</div>
+              <div class="knob" data-knob="xyshift"><span class="knob-dot"></span><span class="knob-plus">+</span></div>
+              <div class="tile-value" data-val="xyshift">0.05</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Toolbar - Fixed at bottom -->
+      <footer class="app-toolbar">
+        <div class="toolbar-section">
+          <div class="file-loader">
+            <input id="fileInput" type="file" accept="audio/*" class="visually-hidden" />
+            <label for="fileInput" class="btn">Choose file</label>
+            <button id="unlockBtn" class="btn" title="Unlock AudioContext">Unlock audio</button>
+            <span id="fileName" class="filename" aria-live="polite"></span>
+          </div>
+        </div>
+        <div class="toolbar-section">
+          <div class="recorder-controls">
+            <button id="recordBtn" class="btn" title="Start audio recording">● Record Audio</button>
+            <button id="recordVideoBtn" class="btn" title="Start video + audio recording">● Record Video</button>
+            <button id="stopRecordBtn" class="btn" disabled title="Stop recording">■ Stop</button>
+            <span id="recordStatus" class="filename" aria-live="polite"></span>
+          </div>
+        </div>
+        <div class="toolbar-section toolbar-hint">
+          <small>Load an audio file, select a region and assign it to a pad (long click).</small>
+        </div>
       </footer>
     </div>
     <script type="module" src="/src/main.ts"></script>
