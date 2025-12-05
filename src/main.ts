@@ -15,6 +15,7 @@ import type { GranularParams } from './modules/granular/GranularWorkletEngine';
 import type { EffectsParams } from './modules/effects/EffectsChain';
 import { createFloatingPanelManager } from './modules/ui/FloatingPanelManager';
 import { createCustomSelect, type SelectOption } from './modules/ui/CustomSelect';
+import { createThemeManager } from './modules/ui/ThemeManager';
 
 type AppState = {
 	contextMgr: ReturnType<typeof createAudioContextManager>;
@@ -76,6 +77,53 @@ const recordBtn = document.getElementById('recordBtn') as HTMLButtonElement;
 const recordVideoBtn = document.getElementById('recordVideoBtn') as HTMLButtonElement;
 const stopRecordBtn = document.getElementById('stopRecordBtn') as HTMLButtonElement;
 const recordStatusEl = document.getElementById('recordStatus') as HTMLElement;
+const themeToggleBtn = document.getElementById('themeToggle') as HTMLButtonElement;
+const themeIcon = document.getElementById('themeIcon') as HTMLElement;
+const appLogo = document.getElementById('appLogo') as HTMLImageElement;
+
+// Function to update logo based on theme
+function updateLogo(theme: 'dark' | 'light') {
+	if (appLogo) {
+		appLogo.src = theme === 'dark' ? '/images/logo.png' : '/images/logo_dark.png';
+	}
+}
+
+// Initialize Theme Manager
+const themeManager = createThemeManager();
+themeManager.init();
+const initialTheme = themeManager.getTheme();
+// Update icon and logo based on initial theme
+themeIcon.textContent = initialTheme === 'dark' ? '☀' : '🌙';
+updateLogo(initialTheme);
+
+// Theme toggle handler
+if (themeToggleBtn && themeIcon) {
+	themeToggleBtn.addEventListener('click', () => {
+		const newTheme = themeManager.toggle();
+		themeIcon.textContent = newTheme === 'dark' ? '☀' : '🌙';
+		updateLogo(newTheme);
+	});
+}
+
+// Watch for theme changes and update UI components
+const themeObserver = new MutationObserver(() => {
+	const currentTheme = document.documentElement.getAttribute('data-theme') as 'dark' | 'light' | null;
+	if (currentTheme) {
+		updateLogo(currentTheme);
+	}
+	// Redraw waveform when theme changes
+	if (waveform) {
+		waveform.forceRedraw();
+	}
+	// Update XY pad theme colors
+	if (xy?.updateTheme) {
+		xy.updateTheme();
+	}
+});
+themeObserver.observe(document.documentElement, {
+	attributes: true,
+	attributeFilter: ['data-theme']
+});
 
 // Initialize Floating Panel Manager
 const panelManager = createFloatingPanelManager();

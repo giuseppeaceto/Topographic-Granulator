@@ -7,6 +7,7 @@ export type XYPad = {
 	setReverbMix?: (reverbMix: number) => void; // Optional method for setting reverb mix (0..1) to control symbol count
 	setFilterCutoff?: (cutoffHz: number, cornerWeight: number) => void; // Optional method for setting filter cutoff to control color tint (radial from TL corner)
 	setDensity?: (density: number, cornerWeight: number) => void; // Optional method for setting density (1-60) to control grid animation (radial from TR corner)
+	updateTheme?: () => void; // Optional method for updating theme colors
 };
 
 export function createXYPad(canvas: HTMLCanvasElement): XYPad {

@@ -56,16 +56,30 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 		return { start: Math.min(s, e), end: Math.max(s, e) };
 	}
 
+	function getThemeColors() {
+		const root = getComputedStyle(document.documentElement);
+		const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+		return {
+			bg: root.getPropertyValue('--waveform-bg').trim() || (isLight ? '#ffffff' : '#111111'),
+			muted: root.getPropertyValue('--muted').trim() || (isLight ? '#6e6e73' : '#a9a9a9'),
+			waveformFill: isLight ? 'rgba(30, 30, 30, 0.2)' : 'rgba(179, 179, 179, 0.3)',
+			waveformStroke: isLight ? '#424245' : '#b3b3b3'
+		};
+	}
+
 	function draw() {
 		const w = canvas.width;
 		const h = canvas.height;
 		ctx2d.clearRect(0, 0, w, h);
+		
+		const themeColors = getThemeColors();
+		
 		// background
-		ctx2d.fillStyle = '#0f1320';
+		ctx2d.fillStyle = themeColors.bg;
 		ctx2d.fillRect(0, 0, w, h);
 
 		if (!buffer) {
-			ctx2d.fillStyle = '#57607a';
+			ctx2d.fillStyle = themeColors.muted;
 			ctx2d.fillText('Load an audio file…', 12, 20);
 			return;
 		}
@@ -76,7 +90,7 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 		const verticalScale = h * 0.9; // Increased from 0.45 to 0.9 for better visibility
 		
 		// Draw filled waveform shape for better visibility
-		ctx2d.fillStyle = 'rgba(179, 179, 179, 0.3)';
+		ctx2d.fillStyle = themeColors.waveformFill;
 		ctx2d.beginPath();
 		ctx2d.moveTo(0, mid);
 		for (let x = 0; x < w; x++) {
@@ -89,7 +103,7 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 		ctx2d.fill();
 		
 		// Draw waveform outline
-		ctx2d.strokeStyle = '#b3b3b3';
+		ctx2d.strokeStyle = themeColors.waveformStroke;
 		ctx2d.lineWidth = 1.5;
 		ctx2d.beginPath();
 		for (let x = 0; x < w; x++) {

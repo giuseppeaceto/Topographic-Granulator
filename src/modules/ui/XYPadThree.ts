@@ -19,7 +19,16 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 		alpha: false,
 		powerPreference: 'high-performance'
 	});
-	renderer.setClearColor(0x111111, 1);
+	// Function to update clear color based on theme
+	function updateClearColor() {
+		const root = getComputedStyle(document.documentElement);
+		const bgColor = root.getPropertyValue('--waveform-bg').trim() || '#111111';
+		// Convert hex string to number (remove # if present)
+		const hex = bgColor.replace('#', '');
+		const color = parseInt(hex, 16);
+		renderer.setClearColor(color, 1);
+	}
+	updateClearColor();
 
 	// Scene and camera (perspective for 3D wireframe look)
 	const scene = new THREE.Scene();
@@ -650,7 +659,12 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 		renderOnce();
 	}
 
-	return { setPosition, getPosition, onChange, setCornerLabels, setSpeed, setReverbMix, setFilterCutoff, setDensity };
+	function updateTheme() {
+		updateClearColor();
+		renderOnce();
+	}
+
+	return { setPosition, getPosition, onChange, setCornerLabels, setSpeed, setReverbMix, setFilterCutoff, setDensity, updateTheme };
 }
 
 

@@ -13,7 +13,7 @@
         <div class="xy-pad-wrapper">
           <div class="xy-header">
             <div class="app-header-section">
-              <img src="/images/logo.png" alt="Logo" class="logo-icon" />
+              <img id="appLogo" src="/images/logo.png" alt="Logo" class="logo-icon" />
               <div class="app-header-text">
                 <h2 class="app-logo">
                   <span class="logo-text">Undergrain</span>
@@ -208,6 +208,11 @@
             <button id="stopRecordBtn" class="btn" disabled title="Stop recording">■ Stop</button>
             <span id="recordStatus" class="filename" aria-live="polite"></span>
           </div>
+        </div>
+        <div class="toolbar-section">
+          <button id="themeToggle" class="btn-icon" title="Toggle theme (dark/light)" aria-label="Toggle theme">
+            <span id="themeIcon">☀</span>
+          </button>
         </div>
         <div class="toolbar-section toolbar-hint">
           <small>Load an audio file, select a region and assign it to a pad (long click).</small>
