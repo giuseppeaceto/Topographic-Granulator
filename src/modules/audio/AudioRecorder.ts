@@ -3,6 +3,7 @@ export type AudioRecorder = {
 	stop: () => Promise<Blob | null>;
 	isRecording: () => boolean;
 	getDuration: () => number;
+	getVideoMimeType: () => string;
 };
 
 export function createAudioRecorder(
@@ -20,6 +21,47 @@ export function createAudioRecorder(
 	let audioStreamDestination: MediaStreamAudioDestinationNode | null = null;
 	let recordedChunks: Blob[] = [];
 	let videoMimeType: string = 'video/webm'; // Track the mime type used
+	
+	function pickMimeType(): string | null {
+		// Prefer explicit audio+video codecs; fall back to generic webm
+		const candidates = [
+			'video/webm;codecs=vp9,opus',
+			'video/webm;codecs=vp8,opus',
+			'video/webm;codecs=vp9',
+			'video/webm;codecs=vp8',
+			'video/webm'
+		];
+		for (const m of candidates) {
+			if (MediaRecorder.isTypeSupported(m)) return m;
+		}
+		return null;
+	}
+	
+	function tryCreateMediaRecorder(stream: MediaStream): { recorder: MediaRecorder, mime: string } {
+		// Try known good mime types; if none, try without specifying
+		const mime = pickMimeType();
+		if (mime) {
+			try {
+				const rec = new MediaRecorder(stream, { mimeType: mime });
+				console.log('[Recorder] Created with mime', mime);
+				return { recorder: rec, mime };
+			} catch (err) {
+				console.warn('[Recorder] Failed with mime', mime, err);
+			}
+		}
+		// Fallback: let browser pick
+		const fallbackMime = 'video/webm';
+		try {
+			const rec = new MediaRecorder(stream, { mimeType: fallbackMime });
+			console.log('[Recorder] Created with fallback mime', fallbackMime);
+			return { recorder: rec, mime: fallbackMime };
+		} catch (err) {
+			console.warn('[Recorder] Failed with fallback webm', err);
+		}
+		// Last resort: no options
+		console.log('[Recorder] Trying without mime options');
+		return { recorder: new MediaRecorder(stream), mime: '' };
+	}
 	const sampleRate = audioContext.sampleRate;
 	const numberOfChannels = 2; // Stereo
 
@@ -73,6 +115,61 @@ export function createAudioRecorder(
 		return buffer;
 	}
 
+	async function getScreenStream(): Promise<MediaStream> {
+		// Check if running in Electron
+		const isElectron = 'electronAPI' in window;
+		
+		if (isElectron) {
+			try {
+				const sources = await (window as any).electronAPI.getDesktopSources();
+				if (sources.length === 0) {
+					throw new Error('No desktop sources found');
+				}
+				// Use the first source (usually the main screen)
+				const sourceId = sources[0].id;
+				
+				const constraints = {
+					audio: false, // Cannot get system audio this way easily, handled by fallback or separate audio track
+					video: {
+						mandatory: {
+							chromeMediaSource: 'desktop',
+							chromeMediaSourceId: sourceId,
+							maxWidth: 1920,
+							maxHeight: 1080,
+							frameRate: 30
+						}
+					}
+				};
+				
+				return await navigator.mediaDevices.getUserMedia(constraints as any);
+			} catch (err) {
+				console.warn('[Recorder] Electron capture failed, falling back to getDisplayMedia');
+				// Fallback to standard API if Electron specific method fails
+			}
+		}
+
+		const videoConstraints: MediaTrackConstraints = {
+			displaySurface: 'browser',
+			width: { ideal: 1920 },
+			height: { ideal: 1080 },
+			frameRate: { ideal: 30 }
+		};
+
+		try {
+			console.log('[Recorder] Requesting display media with audio…');
+			return await navigator.mediaDevices.getDisplayMedia({
+				video: videoConstraints,
+				audio: true
+			});
+		} catch (err) {
+			console.warn('[Recorder] Failed to get display media with audio, retrying without audio...', err);
+			return await navigator.mediaDevices.getDisplayMedia({
+				video: videoConstraints,
+				audio: false
+			});
+		}
+	}
+
 	async function start(withVideo = false) {
 		if (isActive) return;
 
@@ -80,63 +177,72 @@ export function createAudioRecorder(
 		startTime = Date.now();
 
 		if (withVideo) {
-			// Video recording mode: capture screen + audio
+			// Video recording mode: capture screen (video) + app audio (preferito), fallback a system audio o solo video
 			try {
-				// Request screen capture with audio (system audio if available)
-				videoStream = await navigator.mediaDevices.getDisplayMedia({
-					video: { 
-						displaySurface: 'browser',
-						width: { ideal: 1920 },
-						height: { ideal: 1080 }
-					} as any,
-					audio: {
-						echoCancellation: false,
-						noiseSuppression: false,
-						autoGainControl: false
-					} as any // Try to get system audio if available
-				});
+				videoStream = await getScreenStream();
+				console.log('[Recorder] Display media acquired',
+					{ videoTracks: videoStream.getVideoTracks().length, audioTracks: videoStream.getAudioTracks().length });
+
+				const videoTrack = videoStream.getVideoTracks()[0];
+				if (!videoTrack) {
+					throw new Error('Nessuna traccia video dal display.');
+				}
 
 				// Stop video stream when user stops sharing
-				videoStream.getVideoTracks()[0].addEventListener('ended', () => {
+				videoStream.getVideoTracks()[0]?.addEventListener('ended', () => {
 					if (isActive) {
 						stop();
 					}
 				});
 
-				// Create audio stream from audio node (app audio)
+				// Create app-audio stream
 				audioStreamDestination = audioContext.createMediaStreamDestination();
 				audioNode.connect(audioStreamDestination);
 
-				// Combine video and audio streams
-				const combinedStream = new MediaStream();
-				// Add video track
-				videoStream.getVideoTracks().forEach(track => combinedStream.addTrack(track));
-				// Add app audio track (from audio node)
-				audioStreamDestination.stream.getAudioTracks().forEach(track => combinedStream.addTrack(track));
-				// Also add system audio if available from screen capture
-				videoStream.getAudioTracks().forEach(track => combinedStream.addTrack(track));
+				const appAudioTrack = audioStreamDestination.stream.getAudioTracks()[0] || null;
+				const systemAudioTrack = videoStream.getAudioTracks()[0] || null;
 
-				// Setup MediaRecorder for video
-				recordedChunks = [];
-				const options: MediaRecorderOptions = {};
-				// Prioritize MP4 if supported (Safari, some browsers)
-				if (MediaRecorder.isTypeSupported('video/mp4')) {
-					options.mimeType = 'video/mp4';
-					videoMimeType = 'video/mp4';
-				} else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9')) {
-					options.mimeType = 'video/webm;codecs=vp9';
-					videoMimeType = 'video/webm';
-				} else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8')) {
-					options.mimeType = 'video/webm;codecs=vp8';
-					videoMimeType = 'video/webm';
-				} else if (MediaRecorder.isTypeSupported('video/webm')) {
-					options.mimeType = 'video/webm';
-					videoMimeType = 'video/webm';
-				} else {
-					videoMimeType = 'video/webm'; // fallback
+				// Varianti: preferisci app audio, poi system audio, infine solo video
+				const variants: { video: MediaStreamTrack; audio: MediaStreamTrack | null; label: string }[] = [];
+				if (appAudioTrack) variants.push({ video: videoTrack, audio: appAudioTrack, label: 'video + app-audio' });
+				if (systemAudioTrack) variants.push({ video: videoTrack, audio: systemAudioTrack, label: 'video + system-audio' });
+				variants.push({ video: videoTrack, audio: null, label: 'video only' });
+
+				// Log support
+				console.log('[Recorder] MIME support', {
+					'video/webm;codecs=vp9,opus': MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus'),
+					'video/webm;codecs=vp8,opus': MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus'),
+					'video/webm;codecs=vp9': MediaRecorder.isTypeSupported('video/webm;codecs=vp9'),
+					'video/webm;codecs=vp8': MediaRecorder.isTypeSupported('video/webm;codecs=vp8'),
+					'video/webm': MediaRecorder.isTypeSupported('video/webm'),
+					'video/mp4': MediaRecorder.isTypeSupported('video/mp4')
+				});
+
+				let created = false;
+				for (const variant of variants) {
+					const combinedStream = new MediaStream();
+					combinedStream.addTrack(variant.video);
+					if (variant.audio) combinedStream.addTrack(variant.audio);
+					console.log('[Recorder] Trying variant', variant.label, {
+						video: combinedStream.getVideoTracks().length,
+						audio: combinedStream.getAudioTracks().length
+					});
+					try {
+						const { recorder, mime } = tryCreateMediaRecorder(combinedStream);
+						mediaRecorder = recorder;
+						videoMimeType = mime || recorder.mimeType || 'video/webm';
+						console.log('[Recorder] Created MediaRecorder with mime', videoMimeType, 'variant', variant.label);
+						created = true;
+						break;
+					} catch (err) {
+						console.warn('[Recorder] MediaRecorder failed for variant', variant.label, err);
+					}
 				}
 
-				mediaRecorder = new MediaRecorder(combinedStream, options);
+				if (!created || !mediaRecorder) {
+					throw new Error('MediaRecorder non supportato per le tracce disponibili (provati: app-audio, system-audio, video-only).');
+				}
+
 				mediaRecorder.ondataavailable = (event) => {
 					if (event.data.size > 0) {
 						recordedChunks.push(event.data);
@@ -147,6 +253,15 @@ export function createAudioRecorder(
 				isActive = true;
 			} catch (error) {
 				console.error('Errore avvio registrazione video:', error);
+				// Cleanup on error
+				if (videoStream) {
+					videoStream.getTracks().forEach(track => track.stop());
+					videoStream = null;
+				}
+				if (audioStreamDestination) {
+					try { audioNode.disconnect(audioStreamDestination); } catch {}
+					audioStreamDestination = null;
+				}
 				isActive = false;
 				throw error;
 			}
@@ -199,14 +314,15 @@ export function createAudioRecorder(
 		if (isVideoMode) {
 			// Video recording mode
 			if (!mediaRecorder) return null;
+			const rec = mediaRecorder;
 
 			return new Promise((resolve) => {
-				mediaRecorder!.onstop = () => {
+				rec.onstop = () => {
 					if (recordedChunks.length === 0) {
 						resolve(null);
 						return;
 					}
-					const blob = new Blob(recordedChunks, { type: mediaRecorder?.mimeType || 'video/webm' });
+					const blob = new Blob(recordedChunks, { type: rec.mimeType || videoMimeType || 'video/webm' });
 					recordedChunks = [];
 					
 					// Cleanup
@@ -223,7 +339,7 @@ export function createAudioRecorder(
 					resolve(blob);
 				};
 
-				mediaRecorder.stop();
+				rec.stop();
 			});
 		} else {
 			// Audio-only mode

@@ -12,7 +12,10 @@ export function createRegionStore(size: number) {
 	function getAll(): Array<Region | null> {
 		return pads.slice();
 	}
-	return { get, set, getAll };
+	function add() {
+		pads.push(null);
+	}
+	return { get, set, getAll, add };
 }
 
 

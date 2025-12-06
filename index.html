@@ -3,17 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- CSP: More permissive in dev mode for Vite HMR and worklets -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:* ws://localhost:*; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:*; style-src 'self' 'unsafe-inline'; img-src 'self' data: file:; connect-src 'self' http://localhost:* ws://localhost:*; worker-src 'self' blob:; media-src 'self' blob: file:; child-src 'self' blob:;" />
     <title>Granular Music Tool</title>
-    <link rel="stylesheet" href="/src/styles.css" />
+    <link rel="stylesheet" href="./src/styles.css" />
   </head>
   <body>
     <div id="app">
+      <div class="window-drag-bar"></div>
       <!-- XY Pad - Large and centered -->
       <main class="xy-pad-container">
         <div class="xy-pad-wrapper">
           <div class="xy-header">
             <div class="app-header-section">
-              <img id="appLogo" src="/images/logo.png" alt="Logo" class="logo-icon" />
+              <img id="appLogo" src="./images/logo.png" alt="Logo" class="logo-icon" />
               <div class="app-header-text">
                 <h2 class="app-logo">
                   <span class="logo-text">Undergrain</span>
@@ -82,6 +85,10 @@
                 Step: <input id="nudgeStepMs" type="number" min="1" max="1000" value="20" class="nudge-input" /> ms
               </span>
             </div>
+          </div>
+          <div class="control-group">
+             <span class="control-label">Zoom Transients</span>
+             <input id="waveZoom" type="range" min="0.1" max="5" step="0.1" value="1" style="width: 100px;" />
           </div>
         </div>
       </div>
@@ -219,7 +226,7 @@
         </div>
       </footer>
     </div>
-    <script type="module" src="/src/main.ts"></script>
+    <script type="module" src="./src/main.ts"></script>
   </body>
   </html>
 

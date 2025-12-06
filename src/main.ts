@@ -1,6 +1,6 @@
 import { createAudioContextManager } from './modules/audio/AudioContextManager';
 import { createAudioRecorder } from './modules/audio/AudioRecorder';
-import { loadAudioBuffer } from './modules/utils/audioLoader';
+import { loadAudioFile } from './modules/audio/AudioFileLoader';
 import { createRegionStore, type Region } from './modules/editor/RegionStore';
 import { createEffectsChain, type EffectsChain } from './modules/effects/EffectsChain';
 import { createGranularWorkletEngine, type GranularWorkletEngine } from './modules/granular/GranularWorkletEngine';
@@ -10,12 +10,13 @@ import { createWaveformView } from './modules/ui/WaveformView';
 import { createXYPadThree } from './modules/ui/XYPadThree';
 import { PARAMS, type ParamId } from './modules/ui/ParamRegistry';
 import { MidiManager, type MidiMapping, loadMappings, saveMappings } from './modules/midi/MidiManager';
-import { createPadParamStore } from './modules/editor/PadParamStore';
+import { createPadParamStore, defaultEffects } from './modules/editor/PadParamStore';
 import type { GranularParams } from './modules/granular/GranularWorkletEngine';
 import type { EffectsParams } from './modules/effects/EffectsChain';
 import { createFloatingPanelManager } from './modules/ui/FloatingPanelManager';
 import { createCustomSelect, type SelectOption } from './modules/ui/CustomSelect';
 import { createThemeManager } from './modules/ui/ThemeManager';
+import { createUpdateManager } from './modules/utils/updateManager';
 
 type AppState = {
 	contextMgr: ReturnType<typeof createAudioContextManager>;
@@ -41,9 +42,9 @@ const state: AppState = {
 	buffer: null,
 	effects: null,
 	engine: null,
-	regions: createRegionStore(8),
+	regions: createRegionStore(1),
 	activePadIndex: null,
-	padParams: createPadParamStore(8),
+	padParams: createPadParamStore(1),
 	recallPerPad: true,
 	recorder: null,
 	recordingTimer: null,
@@ -61,6 +62,7 @@ const clearSelectionBtn = document.getElementById('clearSelectionBtn') as HTMLBu
 const nudgeLeftBtn = document.getElementById('nudgeLeft') as HTMLButtonElement;
 const nudgeRightBtn = document.getElementById('nudgeRight') as HTMLButtonElement;
 const nudgeStepInput = document.getElementById('nudgeStepMs') as HTMLInputElement;
+const waveZoomInput = document.getElementById('waveZoom') as HTMLInputElement;
 const waveform = createWaveformView(waveformCanvas);
 const recallPerPadEl = document.getElementById('recallPerPad') as HTMLInputElement;
 const midiLearnEl = document.getElementById('midiLearn') as HTMLInputElement | null;
@@ -81,10 +83,21 @@ const themeToggleBtn = document.getElementById('themeToggle') as HTMLButtonEleme
 const themeIcon = document.getElementById('themeIcon') as HTMLElement;
 const appLogo = document.getElementById('appLogo') as HTMLImageElement;
 
+// Helper to get correct asset path for Electron and browser
+function getAssetPath(path: string): string {
+	// Normalize path (remove leading slash if present, then add ./)
+	const normalizedPath = path.startsWith('/') ? path.substring(1) : path;
+	// In Vite with base: './', relative paths work in both dev and production
+	// Use relative paths for better Electron compatibility
+	return './' + normalizedPath;
+}
+
 // Function to update logo based on theme
 function updateLogo(theme: 'dark' | 'light') {
 	if (appLogo) {
-		appLogo.src = theme === 'dark' ? '/images/logo.png' : '/images/logo_dark.png';
+		appLogo.src = theme === 'dark' 
+			? getAssetPath('/images/logo.png') 
+			: getAssetPath('/images/logo_dark.png');
 	}
 }
 
@@ -237,6 +250,15 @@ function updateRecordingUI() {
 	}
 }
 
+function showPermissionHelp() {
+	const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+	let msg = 'Permission to record screen was denied.\n\nPlease enable Screen Recording permission for this app in your system settings.';
+	if (isMac) {
+		msg = 'Screen Recording permission denied.\n\n1. Open System Settings > Privacy & Security > Screen Recording\n2. Enable toggle for "Undergrain" (or your terminal/Electron)\n3. Restart the app';
+	}
+	alert(msg);
+}
+
 recordBtn.addEventListener('click', async () => {
 	ensureEffects();
 	if (!state.recorder) return;
@@ -267,7 +289,12 @@ recordVideoBtn.addEventListener('click', async () => {
 		}, 1000) as any as number;
 	} catch (error) {
 		console.error('Error starting video recording:', error);
-		recordStatusEl.textContent = 'Error starting video recording';
+		if ((error as Error).message === 'PermissionDenied' || (error as any).name === 'NotAllowedError' || (error as any).name === 'AbortError') {
+			showPermissionHelp();
+			recordStatusEl.textContent = 'Permission denied';
+		} else {
+			recordStatusEl.textContent = 'Error starting video recording';
+		}
 		setTimeout(() => {
 			recordStatusEl.textContent = '';
 		}, 3000);
@@ -480,6 +507,15 @@ function setupNudgeButton(btn: HTMLButtonElement, direction: -1 | 1) {
 setupNudgeButton(nudgeLeftBtn, -1);
 setupNudgeButton(nudgeRightBtn, 1);
 
+if (waveZoomInput) {
+	waveZoomInput.addEventListener('input', () => {
+		const val = parseFloat(waveZoomInput.value);
+		if (waveform.setScale) {
+			waveform.setScale(val);
+		}
+	});
+}
+
 function updateSelPosUI() {
 	const sel = waveform.getSelection();
 	const knobEl = document.querySelector('.knob[data-knob="selpos"]') as HTMLElement | null;
@@ -506,21 +542,58 @@ function updateSelPosUI() {
 fileInput.addEventListener('change', async (e) => {
 	const file = (e.target as HTMLInputElement).files?.[0];
 	if (!file) return;
-	await ensureAudioReady();
+
 	const fileNameEl = document.getElementById('fileName');
-	if (fileNameEl) fileNameEl.textContent = file.name;
-	const arrayBuffer = await file.arrayBuffer();
-	const audioBuffer = await loadAudioBuffer(state.contextMgr.audioContext, arrayBuffer);
-	state.buffer = audioBuffer;
-	ensureEngine();
-	ensureEffects();
-	updatePadGrid();
-	waveform.setBuffer(audioBuffer);
-	bufferDurEl.textContent = `Duration: ${audioBuffer.duration.toFixed(2)}s`;
-	updateSelPosUI();
-	if (state.engine) {
-		await state.engine.setBuffer(audioBuffer);
-		state.engine.setRegion(0, audioBuffer.duration);
+	const resetStatus = (msg?: string) => {
+		if (fileNameEl) fileNameEl.textContent = msg ?? '';
+	};
+
+	try {
+		console.log('File selected:', file.name, file.type, `${(file.size / (1024 * 1024)).toFixed(1)} MB`);
+		resetStatus('Loading...');
+		await ensureAudioReady();
+		console.log('Audio context unlocked');
+
+		const loaded = await loadAudioFile(state.contextMgr.audioContext, file);
+		console.log('Audio decoded:', loaded.audioBuffer.duration, 'seconds');
+		resetStatus(loaded.name);
+		
+		state.buffer = loaded.audioBuffer;
+		
+		console.log('Ensuring engine...');
+		await ensureEngine(); // Now await this!
+		console.log('Engine ensured');
+
+		ensureEffects();
+		// If no active pad, select the first one by default
+		if (state.activePadIndex === null && state.regions.getAll().length > 0) {
+			state.activePadIndex = 0;
+			// Also ensure we are synced with this pad's parameters
+			recallPadParams(0, 0); 
+		}
+		updatePadGrid();
+		waveform.setBuffer(loaded.audioBuffer);
+		bufferDurEl.textContent = `Duration: ${loaded.audioBuffer.duration.toFixed(2)}s`;
+		updateSelPosUI();
+		
+		if (state.engine) {
+			console.log('Setting buffer to engine...');
+			try {
+				await state.engine.setBuffer(loaded.audioBuffer);
+				state.engine.setRegion(0, loaded.audioBuffer.duration);
+				console.log('Buffer set to engine');
+			} catch (err) {
+				console.error('Error setting buffer to engine:', err);
+				throw err;
+			}
+		}
+	} catch (error) {
+		console.error('Error loading audio file:', error);
+		resetStatus('Error loading file');
+		alert(error instanceof Error ? error.message : 'Error loading audio file. See console for details.');
+	} finally {
+		// keep the input reset so re-selecting the same file works
+		(e.target as HTMLInputElement).value = '';
 	}
 });
 
@@ -528,20 +601,24 @@ function ensureAudioReady() {
 	return state.contextMgr.unlock();
 }
 
-function ensureEngine() {
+async function ensureEngine() { // Changed to async
 	if (!state.engine) {
 		// init worklet engine asynchronously
-		createGranularWorkletEngine(state.contextMgr.audioContext).then((eng) => {
+		try {
+			const eng = await createGranularWorkletEngine(state.contextMgr.audioContext);
 			state.engine = eng;
 			ensureEffects();
+			// Push current FX params into the Rust engine
+			applyFxToEngine({});
 			state.engine?.connect(state.effects!.input);
 			if (state.buffer) {
 				state.engine.setBuffer(state.buffer);
 				state.engine.setRegion(0, state.buffer.duration);
 			}
-		}).catch((err) => {
+		} catch (err) {
 			console.error('Worklet error:', err);
-		});
+			throw err; // Re-throw to handle in caller
+		}
 	}
 }
 
@@ -557,11 +634,41 @@ function ensureEffects() {
 	}
 }
 
+function getActiveFxParams(): EffectsParams {
+	if (state.activePadIndex != null) {
+		return state.padParams.get(state.activePadIndex).effects;
+	}
+	return defaultEffects();
+}
+
+function applyFxToEngine(patch: Partial<EffectsParams>) {
+	const base = getActiveFxParams();
+	const merged = { ...base, ...patch };
+	if (state.activePadIndex != null) {
+		state.padParams.setEffects(state.activePadIndex, merged);
+	}
+	state.engine?.setEffectParams(merged);
+	return merged;
+}
+
 const PAD_COLORS = ['#A1E34B', '#66D9EF', '#FDBC40', '#FF7AA2', '#7C4DFF', '#00E5A8', '#F06292', '#FFD54F'];
 
 function updatePadGrid() {
 	padGridEl.innerHTML = '';
 	const padGrid = createPadGrid(padGridEl, state.regions.getAll(), { colors: PAD_COLORS, activeIndex: state.activePadIndex });
+	padGrid.onAdd = () => {
+		state.regions.add();
+		state.padParams.add();
+		updatePadGrid();
+		// Update XY pad dropdowns if in pad mode
+		if (getXYMode() === 'pads') {
+			populateParamSelect(customSelectTL);
+			populateParamSelect(customSelectTR);
+			populateParamSelect(customSelectBL);
+			populateParamSelect(customSelectBR);
+			refreshXYCornerLabels();
+		}
+	};
 	padGrid.onPadPress = (index) => {
 		if (state.midi?.learnEnabled) {
 			state.midi.pendingTarget = `pad:${index}`;
@@ -645,13 +752,8 @@ const controls = setupControls({
 		state.engine?.setParams(params);
 	},
 	onFX: (fx) => {
-		ensureEffects();
-		if (!state.effects) return;
-		// persist to active pad
-		if (state.activePadIndex != null) {
-			state.padParams.setEffects(state.activePadIndex, fx as EffectsParams);
-		}
-		state.effects.setParams(fx);
+		ensureEngine();
+		applyFxToEngine(fx as EffectsParams);
 	}
 });
 
@@ -695,7 +797,7 @@ function recallPadParams(index: number, durationMs = 300) {
 		};
 		// engine/effects
 		state.engine?.setParams(interpG);
-		state.effects?.setParams(interpFx);
+		state.engine?.setEffectParams(interpFx);
 		// Sincronizza il riverbero con l'XYPad durante l'interpolazione
 		xy.setReverbMix?.(interpFx.reverbMix);
 		// Sincronizza il filtro cutoff con l'XYPad durante l'interpolazione
@@ -1018,7 +1120,7 @@ const knobConfigs: KnobConfig[] = [
 		get: () => (state.padParams.get(state.activePadIndex ?? 0).effects.filterCutoffHz),
 		set: (v) => {
 			const fx: any = { filterCutoffHz: Math.max(200, Math.round(v)) };
-			state.effects?.setParams(fx);
+			applyFxToEngine(fx);
 			if (state.activePadIndex != null) state.padParams.setEffects(state.activePadIndex, fx);
 			controls.setFxUI(fx);
 			// Aggiorna il colore ciano quando cambia il filtro cutoff (peso 0 perché non viene da XYPad)
@@ -1031,7 +1133,7 @@ const knobConfigs: KnobConfig[] = [
 		get: () => (state.padParams.get(state.activePadIndex ?? 0).effects.filterQ ?? 0),
 		set: (v) => {
 			const fx: any = { filterQ: Math.max(0, Math.min(20, v)) };
-			state.effects?.setParams(fx);
+			applyFxToEngine(fx);
 			if (state.activePadIndex != null) state.padParams.setEffects(state.activePadIndex, fx);
 		},
 		format: (v) => String(Math.round(v))
@@ -1041,7 +1143,7 @@ const knobConfigs: KnobConfig[] = [
 		get: () => (state.padParams.get(state.activePadIndex ?? 0).effects.delayTimeSec),
 		set: (v) => {
 			const fx: any = { delayTimeSec: Math.max(0, Math.min(1.2, v)) };
-			state.effects?.setParams(fx);
+			applyFxToEngine(fx);
 			if (state.activePadIndex != null) state.padParams.setEffects(state.activePadIndex, fx);
 			controls.setFxUI(fx);
 		},
@@ -1052,7 +1154,7 @@ const knobConfigs: KnobConfig[] = [
 		get: () => (state.padParams.get(state.activePadIndex ?? 0).effects.delayMix),
 		set: (v) => {
 			const fx: any = { delayMix: Math.max(0, Math.min(1, v)) };
-			state.effects?.setParams(fx);
+			applyFxToEngine(fx);
 			if (state.activePadIndex != null) state.padParams.setEffects(state.activePadIndex, fx);
 			controls.setFxUI(fx);
 		},
@@ -1063,7 +1165,7 @@ const knobConfigs: KnobConfig[] = [
 		get: () => (state.padParams.get(state.activePadIndex ?? 0).effects.reverbMix),
 		set: (v) => {
 			const fx: any = { reverbMix: Math.max(0, Math.min(1, v)) };
-			state.effects?.setParams(fx);
+			applyFxToEngine(fx);
 			if (state.activePadIndex != null) state.padParams.setEffects(state.activePadIndex, fx);
 			controls.setFxUI(fx);
 			// Aggiorna il numero di simboli nell'XYPad in base al riverbero
@@ -1076,7 +1178,7 @@ const knobConfigs: KnobConfig[] = [
 		get: () => (state.padParams.get(state.activePadIndex ?? 0).effects.masterGain),
 		set: (v) => {
 			const fx: any = { masterGain: Math.max(0, Math.min(1.5, v)) };
-			state.effects?.setParams(fx);
+			applyFxToEngine(fx);
 			if (state.activePadIndex != null) state.padParams.setEffects(state.activePadIndex, fx);
 			controls.setFxUI(fx);
 		},
@@ -1253,7 +1355,7 @@ xy.onChange((pos) => {
 		}
 		// Apply interpolated values to engine/effects/UI (but DO NOT save to pads)
 		state.engine?.setParams(g);
-		state.effects?.setParams(f);
+		state.engine?.setEffectParams(f);
 		// Aggiorna il numero di simboli nell'XYPad se cambia il reverbMix
 		if (f.reverbMix != null) {
 			xy.setReverbMix?.(f.reverbMix);
@@ -1385,7 +1487,7 @@ xy.onChange((pos) => {
 		}
 	}
 	if (Object.keys(fxUpdate).length) {
-		state.effects?.setParams(fxUpdate);
+		applyFxToEngine(fxUpdate);
 		controls.setFxUI(fxUpdate);
 		if (state.activePadIndex != null) state.padParams.setEffects(state.activePadIndex, fxUpdate);
 		// Aggiorna il numero di simboli nell'XYPad se cambia il reverbMix
@@ -1402,5 +1504,37 @@ xy.onChange((pos) => {
 	refreshParamTilesFromState();
 });
 
+// ---------- Update Manager (Electron only) ----------
+const updateManager = createUpdateManager();
 
+// Show notification when update is available
+updateManager.onUpdateAvailable((info) => {
+	console.log('Update available:', info.version);
+	// You can show a notification to the user here
+	if (recordStatusEl) {
+		recordStatusEl.textContent = `Update available: v${info.version}`;
+		setTimeout(() => {
+			recordStatusEl.textContent = '';
+		}, 5000);
+	}
+});
+
+// Show download progress
+updateManager.onDownloadProgress((progress) => {
+	const percent = Math.round(progress.percent || 0);
+	if (recordStatusEl && percent > 0 && percent < 100) {
+		recordStatusEl.textContent = `Downloading update: ${percent}%`;
+	}
+});
+
+// Notify when update is downloaded (will auto-install on next restart)
+updateManager.onUpdateDownloaded((info) => {
+	console.log('Update downloaded:', info.version);
+	if (recordStatusEl) {
+		recordStatusEl.textContent = `Update downloaded! Restart to install v${info.version}`;
+		setTimeout(() => {
+			recordStatusEl.textContent = '';
+		}, 10000);
+	}
+});
 

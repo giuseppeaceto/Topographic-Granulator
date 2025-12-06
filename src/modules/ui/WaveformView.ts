@@ -10,6 +10,7 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 	let moveOffset = 0; // seconds offset used for moving
 	let selectionColor = '#a1e34b';
 	let selectionFill = 'rgba(161, 227, 75, 0.18)';
+	let drawScale = 1; // default scale factor
 	const HANDLE_PX_DRAW = 8;
 	const HANDLE_PX_HIT = 10;
 
@@ -73,63 +74,121 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 		ctx2d.clearRect(0, 0, w, h);
 		
 		const themeColors = getThemeColors();
+		const isLight = themeColors.bg.includes('#f') || themeColors.bg.includes('255');
 		
-		// background
-		ctx2d.fillStyle = themeColors.bg;
+		// innovative "topographic" particle look
+		// Force dark background for this specific style if preferred, or adapt
+		const bg = isLight ? '#f0f0f0' : '#050505';
+		const dotColor = isLight ? 'rgba(0,0,0,0.8)' : 'rgba(255,255,255,0.9)';
+		
+		ctx2d.fillStyle = bg;
 		ctx2d.fillRect(0, 0, w, h);
 
 		if (!buffer) {
 			ctx2d.fillStyle = themeColors.muted;
-			ctx2d.fillText('Load an audio file…', 12, 20);
+			ctx2d.font = '14px Inter, sans-serif';
+			ctx2d.fillText('Load an audio file…', 12, 25);
 			return;
 		}
 
-		// waveform (mono mix) - improved visibility with filled shape
-		const samples = resampleForDraw(buffer, w);
-		const mid = h / 2;
-		const verticalScale = h * 0.9; // Increased from 0.45 to 0.9 for better visibility
-		
-		// Draw filled waveform shape for better visibility
-		ctx2d.fillStyle = themeColors.waveformFill;
-		ctx2d.beginPath();
-		ctx2d.moveTo(0, mid);
-		for (let x = 0; x < w; x++) {
-			const v = samples[x] || 0;
-			const y = mid - v * verticalScale;
-			ctx2d.lineTo(x, y);
-		}
-		ctx2d.lineTo(w, mid);
-		ctx2d.closePath();
-		ctx2d.fill();
-		
-		// Draw waveform outline
-		ctx2d.strokeStyle = themeColors.waveformStroke;
-		ctx2d.lineWidth = 1.5;
-		ctx2d.beginPath();
-		for (let x = 0; x < w; x++) {
-			const v = samples[x] || 0;
-			const y = mid - v * verticalScale;
-			if (x === 0) ctx2d.moveTo(x, y);
-			else ctx2d.lineTo(x, y);
-		}
-		ctx2d.stroke();
-
-		// selection overlay
+		// selection overlay (drawn behind dots for better visibility of data)
 		if (selection) {
 			const x1 = timeToX(selection.start);
 			const x2 = timeToX(selection.end);
-			ctx2d.fillStyle = selectionFill;
-			ctx2d.fillRect(Math.min(x1, x2), 0, Math.abs(x2 - x1), h);
+			const sx = Math.min(x1, x2);
+			const sw = Math.abs(x2 - x1);
+			
+			// Subtle selection background
+			ctx2d.fillStyle = isLight ? 'rgba(161, 227, 75, 0.1)' : 'rgba(161, 227, 75, 0.08)';
+			ctx2d.fillRect(sx, 0, sw, h);
+			
+			// Selection borders
 			ctx2d.strokeStyle = selectionColor;
-			ctx2d.lineWidth = 2;
-			ctx2d.strokeRect(Math.min(x1, x2), 0, Math.abs(x2 - x1), h);
+			ctx2d.lineWidth = 1;
+			ctx2d.beginPath();
+			ctx2d.moveTo(sx, 0);
+			ctx2d.lineTo(sx, h);
+			ctx2d.moveTo(sx + sw, 0);
+			ctx2d.lineTo(sx + sw, h);
+			ctx2d.stroke();
+		}
 
-			// resize handles
-			ctx2d.fillStyle = selectionColor;
+		const samples = resampleForDraw(buffer, w);
+		const mid = h / 2;
+		const verticalScale = h * 0.9 * drawScale;
+		
+		// Particle/Dot rendering
+		const stepX = 12; // Spacing between vertical columns (less dense)
+		const stepY = 10; // Spacing between dots vertically (less dense)
+		
+		ctx2d.fillStyle = dotColor;
+
+		for (let x = 0; x < w; x += stepX) {
+			// Find max amplitude in this horizontal slice
+			let maxAmp = 0;
+			for (let k = 0; k < stepX && x + k < w; k++) {
+				const v = samples[x + k];
+				if (v > maxAmp) maxAmp = v;
+			}
+
+			// Threshold to avoid drawing noise in silence
+			if (maxAmp < 0.005) {
+				// Optional: Draw a single center dot for silence
+				if (x % (stepX * 2) === 0) {
+					ctx2d.globalAlpha = 0.2;
+					ctx2d.beginPath();
+					ctx2d.arc(x, mid, 1.5, 0, Math.PI * 2);
+					ctx2d.fill();
+					ctx2d.globalAlpha = 1.0;
+				}
+				continue;
+			}
+
+			const height = maxAmp * verticalScale;
+			const top = mid - height;
+			const bottom = mid + height;
+
+			// Draw vertical column of dots
+			for (let y = mid; y >= top; y -= stepY) {
+				// Vary dot size or opacity based on distance from center?
+				// Reference has fairly uniform dots, maybe slightly smaller at edges
+				const dist = (mid - y) / height; // 0 to 1
+				const size = 3.0 - (dist * 1.0); 
+				
+				ctx2d.globalAlpha = 1.0 - (dist * 0.3); // Fade out slightly at peaks
+				ctx2d.beginPath();
+				ctx2d.arc(x, y, size, 0, Math.PI * 2);
+				ctx2d.fill();
+			}
+			// Mirror for bottom half
+			for (let y = mid + stepY; y <= bottom; y += stepY) {
+				const dist = (y - mid) / height;
+				const size = 3.0 - (dist * 1.0);
+				
+				ctx2d.globalAlpha = 1.0 - (dist * 0.3);
+				ctx2d.beginPath();
+				ctx2d.arc(x, y, size, 0, Math.PI * 2);
+				ctx2d.fill();
+			}
+		}
+		
+		ctx2d.globalAlpha = 1.0;
+
+		// Resize handles (if selection exists)
+		if (selection) {
+			const x1 = timeToX(selection.start);
+			const x2 = timeToX(selection.end);
 			const lx = Math.min(x1, x2);
 			const rx = Math.max(x1, x2);
-			ctx2d.fillRect(lx - HANDLE_PX_DRAW / 2, 0, HANDLE_PX_DRAW, h);
-			ctx2d.fillRect(rx - HANDLE_PX_DRAW / 2, 0, HANDLE_PX_DRAW, h);
+			
+			ctx2d.fillStyle = selectionColor;
+			// Small handle indicators at top/bottom instead of full bars to keep it clean
+			const handleH = 12;
+			ctx2d.fillRect(lx - 1, 0, 2, handleH);
+			ctx2d.fillRect(lx - 1, h - handleH, 2, handleH);
+			
+			ctx2d.fillRect(rx - 1, 0, 2, handleH);
+			ctx2d.fillRect(rx - 1, h - handleH, 2, handleH);
 		}
 	}
 
@@ -265,6 +324,10 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 		getSelection: () => selection,
 		onSelection: (cb: (sel: WaveformSelection | null) => void) => (events.onSelection = cb),
 		forceRedraw: draw,
+		setScale: (scale: number) => {
+			drawScale = scale;
+			draw();
+		},
 		setColor: (stroke: string, fill?: string) => {
 			selectionColor = stroke;
 			selectionFill = fill ?? selectionFill;

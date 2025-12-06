@@ -11,7 +11,7 @@ export function defaultGranular(): GranularParams {
 }
 
 export function defaultEffects(): EffectsParams {
-	return { filterCutoffHz: 4000, filterQ: 0, delayTimeSec: 0.25, delayMix: 0.15, reverbMix: 0.2, masterGain: 0.9 };
+	return { filterCutoffHz: 4000, filterQ: 0.707, delayTimeSec: 0.25, delayMix: 0.15, delayFeedback: 0.3, reverbMix: 0.2, masterGain: 0.9, reverbRoom: 0.5, reverbDamp: 0.5 };
 }
 
 export function createPadParamStore(size: number) {
@@ -36,7 +36,13 @@ export function createPadParamStore(size: number) {
 	function setEffects(index: number, fx: Partial<EffectsParams>) {
 		set(index, { effects: fx as EffectsParams });
 	}
-	return { get, set, setGranular, setEffects };
+	function add() {
+		store.push({
+			granular: defaultGranular(),
+			effects: defaultEffects()
+		});
+	}
+	return { get, set, setGranular, setEffects, add };
 }
 
 

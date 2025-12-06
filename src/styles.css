@@ -91,6 +91,22 @@ body {
   background: var(--panel);
   border-bottom: 1px solid var(--border);
 }
+.window-drag-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 32px;
+  z-index: 100;
+  -webkit-app-region: drag;
+  /* Make it invisible but interactive for dragging */
+  background: transparent; 
+}
+/* Ensure controls in the drag bar (if any) are clickable */
+.window-drag-bar button, .window-drag-bar input {
+  -webkit-app-region: no-drag;
+}
+
 .app-footer { border-top: 1px solid var(--border); border-bottom: none; }
 h1, h2 { margin: 0 0 8px 0; font-weight: 600; }
 .app-header-section {
@@ -217,6 +233,7 @@ h1, h2 { margin: 0 0 8px 0; font-weight: 600; }
   overflow: hidden;
   min-width: 300px;
   min-height: 200px;
+  z-index: 200; /* Ensure panels are above drag bar */
 }
 .panel-header {
   background: var(--panel-header);

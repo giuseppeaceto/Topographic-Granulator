@@ -1,19 +1,138 @@
 {
-  "name": "granular-music-tool",
-  "private": true,
+  "name": "undergrain",
+  "productName": "Undergrain",
+  "description": "Topographic Granulator - Desktop Audio Application",
   "version": "0.1.0",
+  "private": true,
+  "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview --port 5173"
+    "build:wasm": "cd granular-core && wasm-pack build --target web --out-dir ../src/wasm --out-name granular-core",
+    "build": "npm run build:wasm && vite build",
+    "preview": "vite preview --port 5173",
+    "electron:dev": "NODE_ENV=development electron .",
+    "electron:dev:wait": "wait-on http://localhost:5173 && NODE_ENV=development electron .",
+    "electron:dev:full": "./scripts/dev-electron.sh",
+    "electron:build": "npm run build && electron-builder",
+    "electron:build:mac": "npm run build && electron-builder --mac",
+    "electron:build:win": "npm run build && electron-builder --win",
+    "electron:build:linux": "npm run build && electron-builder --linux",
+    "electron:build:all": "npm run build && electron-builder --mac --win --linux"
   },
   "dependencies": {
     "three": "^0.160.1"
   },
   "devDependencies": {
     "@types/three": "^0.181.0",
+    "electron": "^39.2.6",
+    "electron-builder": "^24.9.1",
+    "electron-updater": "^6.1.7",
     "typescript": "^5.6.3",
-    "vite": "^5.4.8"
+    "vite": "^5.4.8",
+    "vite-plugin-top-level-await": "^1.6.0",
+    "vite-plugin-wasm": "^3.5.0",
+    "wait-on": "^7.0.1"
+  },
+  "build": {
+    "appId": "com.undergrain.app",
+    "productName": "Undergrain",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "public/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "public",
+        "to": "public",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.music",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "build/icon.icns",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "ia32"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "publisherName": "Undergrain"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "rpm",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "category": "AudioVideo"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "your-github-username",
+      "repo": "Topographic-Granulator"
+    }
   }
 }
