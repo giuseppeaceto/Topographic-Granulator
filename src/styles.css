@@ -715,7 +715,7 @@ hr { border: none; border-top: 1px solid var(--hr-color); margin: 14px 0; }
 .xy-assign { display: flex; flex-direction: column; gap: 8px; }
 .xy-assign-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .xy-assign label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
-.xy-assign select {
+.xy-assign select, select.select {
   background: var(--select-bg); color: var(--text); border: 1px solid var(--select-border); border-radius: 6px; padding: 6px;
 }
 /* Custom Select Styles */

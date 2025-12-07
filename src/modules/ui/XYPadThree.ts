@@ -499,6 +499,14 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 		emit();
 	}
 	function getPosition() { return { ...pos }; }
+    
+    // Silent update (only visual, no emit) - for programmatic recall
+    function setPositionSilent(x: number, y: number) {
+		pos.x = clamp(x, 0, 1);
+		pos.y = clamp(y, 0, 1);
+		updateColorsAndKnob();
+		renderOnce();
+    }
 
 	// Raycasting helpers to map pointer to the tilted plane in perspective
 	const raycaster = new THREE.Raycaster();
@@ -664,7 +672,7 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 		renderOnce();
 	}
 
-	return { setPosition, getPosition, onChange, setCornerLabels, setSpeed, setReverbMix, setFilterCutoff, setDensity, updateTheme };
+	return { setPosition, getPosition, onChange, setCornerLabels, setSpeed, setReverbMix, setFilterCutoff, setDensity, updateTheme, setPositionSilent };
 }
 
 

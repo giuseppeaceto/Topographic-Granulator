@@ -15,6 +15,7 @@ export type GranularWorkletEngine = {
 	setRegion: (startSec: number, endSec: number) => void;
 	setParams: (params: Partial<GranularParams>) => void;
 	setEffectParams: (params: Partial<EffectsParams>) => void;
+	setAllParams: (granular: GranularParams, fx: EffectsParams, region: { start: number, end: number }) => void;
 	trigger: () => void;
 	stop: () => void;
 };
@@ -163,6 +164,38 @@ export async function createGranularWorkletEngine(ctx: AudioContext): Promise<Gr
 				}
 			});
 		}
+		function setAllParams(g: GranularParams, fx: EffectsParams, r: { start: number, end: number }) {
+			params = { ...g };
+			fxParams = { ...fx };
+			region = { ...r };
+			
+			if (!buffer) return; // Buffer is needed for sample rate conversion
+			
+			const delayTimeMs = fxParams.delayTimeSec * 1000;
+			const startSample = Math.floor(region.start * buffer.sampleRate);
+			const endSample = Math.floor(region.end * buffer.sampleRate);
+			
+			node.port.postMessage({
+				type: 'setAllParams',
+				data: {
+					grainSizeMs: params.grainSizeMs,
+					density: params.density,
+					randomStartMs: params.randomStartMs,
+					pitchSemitones: params.pitchSemitones,
+					
+					filterCutoffHz: fxParams.filterCutoffHz,
+					filterQ: fxParams.filterQ,
+					delayTimeMs,
+					delayFeedback: fxParams.delayFeedback,
+					delayMix: fxParams.delayMix,
+					reverbMix: fxParams.reverbMix,
+					masterGain: fxParams.masterGain,
+					
+					startSample,
+					endSample
+				}
+			});
+		}
 		function trigger() {
 			node.port.postMessage({ type: 'trigger', on: true });
 		}
@@ -170,11 +203,9 @@ export async function createGranularWorkletEngine(ctx: AudioContext): Promise<Gr
 			node.port.postMessage({ type: 'trigger', on: false });
 		}
 
-		return { connect, disconnect, setBuffer, setRegion, setParams, setEffectParams, trigger, stop };
+		return { connect, disconnect, setBuffer, setRegion, setParams, setEffectParams, setAllParams, trigger, stop };
 	} catch (nodeError) {
 		console.error('Error creating AudioWorkletNode:', nodeError);
 		throw nodeError;
 	}
 }
-
-

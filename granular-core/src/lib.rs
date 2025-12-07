@@ -155,6 +155,35 @@ impl GranularEngine {
         self.master_gain = master_gain.max(0.0);
     }
     
+    // Metodo unificato per aggiornare tutto lo stato (preset recall optimization)
+    fn set_all_params_internal(&mut self, 
+        grain_size_ms: f32, density: f32, random_start_ms: f32, pitch_semitones: f32,
+        cutoff: f32, q: f32, delay_time_ms: f32, delay_feedback: f32, delay_mix: f32, reverb_mix: f32, master_gain: f32,
+        region_start: usize, region_end: usize
+    ) {
+        // Granular
+        self.grain_size_ms = grain_size_ms;
+        self.density = density;
+        self.random_start_ms = random_start_ms;
+        self.pitch_semitones = pitch_semitones;
+        
+        // FX
+        self.filter.set_params(cutoff, q);
+        self.delay_time_ms = delay_time_ms;
+        self.delay_feedback = delay_feedback;
+        self.delay_mix = delay_mix.clamp(0.0, 1.0);
+        self.reverb_mix = reverb_mix.clamp(0.0, 1.0);
+        self.reverb.set_params(self.reverb_mix, 0.5, 0.5);
+        self.master_gain = master_gain.max(0.0);
+        
+        // Region
+        let len = self.audio_buffer.len();
+        if len > 0 {
+            self.region_start = region_start.min(len);
+            self.region_end = region_end.min(len).max(self.region_start);
+        }
+    }
+    
     fn set_playing_internal(&mut self, playing: bool) {
         self.is_playing = playing;
         // Reset effects state on stop? Or keep ringing? 
@@ -305,6 +334,20 @@ pub fn granularengine_set_effect_params(
     master_gain: f32
 ) {
     engine.set_effect_params_internal(cutoff, q, delay_time_ms, delay_feedback, delay_mix, reverb_mix, master_gain);
+}
+
+#[wasm_bindgen]
+pub fn granularengine_set_all_params(
+    engine: &mut GranularEngine,
+    grain_size_ms: f32, density: f32, random_start_ms: f32, pitch_semitones: f32,
+    cutoff: f32, q: f32, delay_time_ms: f32, delay_feedback: f32, delay_mix: f32, reverb_mix: f32, master_gain: f32,
+    region_start: usize, region_end: usize
+) {
+    engine.set_all_params_internal(
+        grain_size_ms, density, random_start_ms, pitch_semitones,
+        cutoff, q, delay_time_ms, delay_feedback, delay_mix, reverb_mix, master_gain,
+        region_start, region_end
+    );
 }
 
 #[wasm_bindgen]

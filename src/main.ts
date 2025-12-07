@@ -8,6 +8,7 @@ import { createPadGrid } from './modules/ui/PadGrid';
 import { setupControls } from './modules/ui/Controls';
 import { createWaveformView } from './modules/ui/WaveformView';
 import { createXYPadThree } from './modules/ui/XYPadThree';
+import { createMotionPanel } from './modules/ui/MotionPanel';
 import { PARAMS, type ParamId } from './modules/ui/ParamRegistry';
 import { MidiManager, type MidiMapping, loadMappings, saveMappings } from './modules/midi/MidiManager';
 import { createPadParamStore, defaultEffects } from './modules/editor/PadParamStore';
@@ -176,6 +177,41 @@ if (effectsPanel) {
 		defaultSize: { width: 260, height: 400 },
 		minSize: { width: 240, height: 380 },
 		resizable: true
+	});
+}
+
+const motionPanel = document.getElementById('panel-motion') as HTMLElement;
+let motionCtrl: ReturnType<typeof createMotionPanel> | null = null;
+if (motionPanel) {
+	panelManager.registerPanel({
+		id: 'motion',
+		element: motionPanel,
+		defaultPosition: { x: 20, y: 440 },
+		defaultSize: { width: 250, height: 350 },
+		minSize: { width: 200, height: 300 },
+		resizable: true
+	});
+
+	motionCtrl = createMotionPanel({
+		canvas: document.getElementById('motionCanvas') as HTMLCanvasElement,
+		cursor: document.getElementById('motionCursor') as HTMLElement,
+		recordBtn: document.getElementById('motionRecordBtn') as HTMLButtonElement,
+		playBtn: document.getElementById('motionPlayBtn') as HTMLButtonElement,
+		clearBtn: document.getElementById('motionClearBtn') as HTMLButtonElement,
+		loopModeSelect: document.getElementById('motionLoopMode') as HTMLSelectElement,
+		speedInput: document.getElementById('motionSpeed') as HTMLInputElement,
+		onPosition: (x, y) => {
+			if (xy && xy.setPosition) {
+				xy.setPosition(x, y);
+			}
+		}
+	});
+
+	// Stop motion playback if user interacts with main XY pad
+	xyCanvas.addEventListener('pointerdown', () => {
+		if (motionCtrl && motionCtrl.isPlaying()) {
+			motionCtrl.stop();
+		}
 	});
 }
 
@@ -675,21 +711,31 @@ function updatePadGrid() {
 			highlightPending(state.midi.pendingTarget);
 			return;
 		}
+		const prevIndex = state.activePadIndex;
 		state.activePadIndex = index;
 		snapshotBaseFromCurrentPad();
-		// recall pad parameters smoothly before triggering (if enabled)
+		
+		// If smooth recall is enabled, handle everything in recallPadParams
 		if (state.recallPerPad) {
-			recallPadParams(index, 300);
+			recallPadParams(index, 300, prevIndex);
+			// Colorize waveform selection based on pad (visual only, selection moves in recallPadParams)
+			const c = PAD_COLORS[index % PAD_COLORS.length];
+			waveform.setColor(c, hexToRgba(c, 0.18));
+			
+			// Ensure engine is running
+			if (state.engine && state.buffer) {
+				state.engine.trigger();
+			}
+		} else {
+			// Instant recall behavior
+			const c = PAD_COLORS[index % PAD_COLORS.length];
+			waveform.setColor(c, hexToRgba(c, 0.18));
+			recallWaveformSelection(index);
+			updateSelPosUI();
+			
+			const region = state.regions.get(index);
+			if (region && state.buffer) triggerRegion(region);
 		}
-		// colorize waveform selection based on pad
-		const c = PAD_COLORS[index % PAD_COLORS.length];
-		waveform.setColor(c, hexToRgba(c, 0.18));
-		// recall waveform selection for this pad
-		recallWaveformSelection(index);
-	updateSelPosUI();
-		const region = state.regions.get(index);
-		if (!region || !state.buffer) return;
-		triggerRegion(region);
 	};
 	padGrid.onPadLongPress = (index) => {
 		if (state.midi?.learnEnabled) {
@@ -697,35 +743,45 @@ function updatePadGrid() {
 			highlightPending(state.midi.pendingTarget);
 			return;
 		}
+		const prevIndex = state.activePadIndex;
 		state.activePadIndex = index;
 		snapshotBaseFromCurrentPad();
-		// recall when selecting too (if enabled), so tweaks you do next apply to this pad's baseline
-		if (state.recallPerPad) {
-			recallPadParams(index, 300);
-		}
+		
 		// colorize waveform for this pad
 		const c = PAD_COLORS[index % PAD_COLORS.length];
 		waveform.setColor(c, hexToRgba(c, 0.18));
-		// recall waveform selection for this pad as visual feedback
-		// IMPORTANT: Only recall if pad has saved region, otherwise preserve current selection
-		const existingRegion = state.regions.get(index);
-		if (existingRegion) {
-			recallWaveformSelection(index);
+		
+		if (state.recallPerPad) {
+			recallPadParams(index, 300, prevIndex);
+		} else {
+			// Instant recall
+			const existingRegion = state.regions.get(index);
+			if (existingRegion) {
+				recallWaveformSelection(index);
+			}
 		}
+		
 		updateSelPosUI();
+		// ... existing long press logic for assigning selection ...
 		if (!state.buffer) return;
-		// assign current waveform selection
 		const sel = waveform.getSelection();
 		if (sel) {
+			// Only show prompt if we're not just switching/recalling
+			// Actually long press is usually for assigning.
+			// If we just interpolated to it, we might be at the target region already or moving there.
+			// But assignment takes CURRENT selection.
+			// If we are moving, taking current selection is weird.
+			// Standard behavior: long press assigns CURRENT selection to pad.
 			const name = prompt('Name (optional):', state.regions.get(index)?.name ?? '') ?? '';
 			const region = { start: sel.start, end: sel.end, name: name || undefined };
 			state.regions.set(index, region);
-			// ensure waveform reflects what we just assigned
+			// ensure waveform reflects what we just assigned (stops interpolation if any?)
+			// If we just assigned it, we want it to stay there.
 			waveform.setSelection(region.start, region.end);
 		}
 		updatePadGrid();
-			// Update XY pad dropdowns if in pad mode
-			if (getXYMode() === 'pads') {
+		// Update XY pad dropdowns if in pad mode
+		if (getXYMode() === 'pads') {
 			populateParamSelect(cornerTL);
 			populateParamSelect(cornerTR);
 			populateParamSelect(cornerBL);
@@ -760,60 +816,158 @@ const controls = setupControls({
 // Initial render
 updatePadGrid();
 
-// Smoothly recall parameters for a pad and move UI controls
-let recallTimer: number | null = null;
-function recallPadParams(index: number, durationMs = 300) {
-	const target = state.padParams.get(index);
-	if (!target) return;
-	// cancel any ongoing transition
-	if (recallTimer != null) { clearInterval(recallTimer); recallTimer = null; }
-	const steps = Math.max(1, Math.floor(durationMs / 16));
-	let step = 0;
-	// Read current from active pad state (robust even if sliders are not present)
-	const currentPad = state.padParams.get(state.activePadIndex ?? index);
-	const fromG = currentPad.granular;
-	const fromFx = currentPad.effects;
-	const toG = target.granular;
-	const toFx = target.effects;
-	// ensure UI reflects start
-	controls.setGranularUI(fromG);
-	controls.setFxUI(fromFx);
-	refreshParamTilesFromState();
-	recallTimer = setInterval(() => {
-		step++;
-		const t = step / steps;
-		const interpG: GranularParams = {
-			grainSizeMs: fromG.grainSizeMs + (toG.grainSizeMs - fromG.grainSizeMs) * t,
-			density: fromG.density + (toG.density - fromG.density) * t,
-			randomStartMs: fromG.randomStartMs + (toG.randomStartMs - fromG.randomStartMs) * t,
-			pitchSemitones: fromG.pitchSemitones + (toG.pitchSemitones - fromG.pitchSemitones) * t
-		};
-		const interpFx: EffectsParams = {
-			filterCutoffHz: fromFx.filterCutoffHz + (toFx.filterCutoffHz - fromFx.filterCutoffHz) * t,
-			delayTimeSec: fromFx.delayTimeSec + (toFx.delayTimeSec - fromFx.delayTimeSec) * t,
-			delayMix: fromFx.delayMix + (toFx.delayMix - fromFx.delayMix) * t,
-			reverbMix: fromFx.reverbMix + (toFx.reverbMix - fromFx.reverbMix) * t,
-			masterGain: fromFx.masterGain + (toFx.masterGain - fromFx.masterGain) * t
-		};
-		// engine/effects
-		state.engine?.setParams(interpG);
-		state.engine?.setEffectParams(interpFx);
-		// Sincronizza il riverbero con l'XYPad durante l'interpolazione
-		xy.setReverbMix?.(interpFx.reverbMix);
-		// Sincronizza il filtro cutoff con l'XYPad durante l'interpolazione
-		xy.setFilterCutoff?.(interpFx.filterCutoffHz, 0);
-		// Sincronizza la densità con l'XYPad durante l'interpolazione
-		xy.setDensity?.(interpG.density, 0);
-		// UI
-		controls.setGranularUI(interpG);
-		controls.setFxUI(interpFx);
-		refreshParamTilesFromState();
-		if (step >= steps) {
-			clearInterval(recallTimer!);
-			recallTimer = null;
+// Helper to calculate parameter weight based on XY position and corner mappings
+	function calculateParamWeight(paramId: string, pos: { x: number; y: number }): number {
+		if (getXYMode() === 'pads') return 0; // In pads mode, parameter visualization is driven by pad values directly (or disabled)
+		
+		const wTL = (1 - pos.x) * (1 - pos.y);
+		const wTR = pos.x * (1 - pos.y);
+		const wBL = (1 - pos.x) * pos.y;
+		const wBR = pos.x * pos.y;
+		
+		let weight = 0;
+		if (customSelectTL?.getValue() === paramId) weight += wTL;
+		if (customSelectTR?.getValue() === paramId) weight += wTR;
+		if (customSelectBL?.getValue() === paramId) weight += wBL;
+		if (customSelectBR?.getValue() === paramId) weight += wBR;
+		
+		return weight;
+	}
+
+	// Smoothly recall parameters for a pad and move UI controls
+	let recallTimer: number | null = null;
+	function recallPadParams(index: number, durationMs = 300, fromIndex: number | null = null) {
+		const target = state.padParams.get(index);
+		if (!target) return;
+		// cancel any ongoing transition
+		if (recallTimer != null) { clearInterval(recallTimer); recallTimer = null; }
+		
+		const targetXY = target.xy || { x: 0.5, y: 0.5 };
+
+		// If duration is 0 or very short, skip interpolation and set immediately (optimizes manual pad switch)
+		if (durationMs < 16) {
+			const region = state.regions.get(index);
+			const safeRegion = region ? { start: region.start, end: region.end } : { start: 0, end: state.buffer?.duration || 0 };
+			state.engine?.setAllParams(target.granular, target.effects, safeRegion);
+			
+			// Visual updates for instant recall
+			if (safeRegion.end > 0) waveform.setSelection(safeRegion.start, safeRegion.end);
+			updateSelPosUI();
+			
+			controls.setGranularUI(target.granular);
+			controls.setFxUI(target.effects);
+			refreshParamTilesFromState();
+			
+			// Restore XY position for this pad
+			if (target.xy && xy.setPositionSilent) {
+				xy.setPositionSilent(target.xy.x, target.xy.y);
+			}
+			
+			// Update visual cues immediately
+			xy.setReverbMix?.(target.effects.reverbMix);
+			
+			const cutoffWeight = calculateParamWeight('filterCutoffHz', targetXY);
+			xy.setFilterCutoff?.(target.effects.filterCutoffHz, cutoffWeight);
+			
+			const densityWeight = calculateParamWeight('density', targetXY);
+			xy.setDensity?.(target.granular.density, densityWeight);
+			return;
 		}
-	}, 16) as any as number;
-}
+
+		const steps = Math.max(1, Math.floor(durationMs / 16));
+		let step = 0;
+		// Read current from active pad state (robust even if sliders are not present)
+		// Use fromIndex if provided, otherwise fallback to index (instant jump if no previous pad)
+		const effectiveFromIndex = fromIndex ?? index;
+		const currentPad = state.padParams.get(effectiveFromIndex);
+		const fromG = currentPad.granular;
+		const fromFx = currentPad.effects;
+		const fromXY = currentPad.xy || { x: 0.5, y: 0.5 };
+		
+		// Interpolate regions: Start from current waveform selection
+		const currentSel = waveform.getSelection();
+		const fromRegion = currentSel ? { start: currentSel.start, end: currentSel.end } : { start: 0, end: 0 };
+		const targetRegionData = state.regions.get(index);
+		const toRegion = targetRegionData ? { start: targetRegionData.start, end: targetRegionData.end } : { start: 0, end: state.buffer?.duration || 0 };
+
+		const toG = target.granular;
+		const toFx = target.effects;
+		const toXY = targetXY;
+		
+		// ensure UI reflects start
+		controls.setGranularUI(fromG);
+		controls.setFxUI(fromFx);
+		if (xy.setPositionSilent) xy.setPositionSilent(fromXY.x, fromXY.y);
+		
+		// Initialize visual state to "from" values immediately to prevent flash of target state
+		xy.setReverbMix?.(fromFx.reverbMix);
+		const startCutoffWeight = calculateParamWeight('filterCutoffHz', fromXY);
+		xy.setFilterCutoff?.(fromFx.filterCutoffHz, startCutoffWeight);
+		const startDensityWeight = calculateParamWeight('density', fromXY);
+		xy.setDensity?.(fromG.density, startDensityWeight);
+		
+		refreshParamTilesFromState();
+		recallTimer = setInterval(() => {
+			step++;
+			const t = step / steps;
+			// Smoothstep easing (t*t*(3-2*t)) for smoother motion
+			const ease = t * t * (3 - 2 * t);
+			
+			// Smooth interpolation for XY position
+			const interpXY = {
+				x: fromXY.x + (toXY.x - fromXY.x) * ease,
+				y: fromXY.y + (toXY.y - fromXY.y) * ease
+			};
+			if (xy.setPositionSilent) xy.setPositionSilent(interpXY.x, interpXY.y);
+			
+			// Smooth interpolation for Region
+			const interpRegion = {
+				start: fromRegion.start + (toRegion.start - fromRegion.start) * ease,
+				end: fromRegion.end + (toRegion.end - fromRegion.end) * ease
+			};
+			waveform.setSelection(interpRegion.start, interpRegion.end);
+			updateSelPosUI();
+
+			const interpG: GranularParams = {
+				grainSizeMs: fromG.grainSizeMs + (toG.grainSizeMs - fromG.grainSizeMs) * t,
+				density: fromG.density + (toG.density - fromG.density) * t,
+				randomStartMs: fromG.randomStartMs + (toG.randomStartMs - fromG.randomStartMs) * t,
+				pitchSemitones: fromG.pitchSemitones + (toG.pitchSemitones - fromG.pitchSemitones) * t
+			};
+			const interpFx: EffectsParams = {
+				filterCutoffHz: fromFx.filterCutoffHz + (toFx.filterCutoffHz - fromFx.filterCutoffHz) * t,
+				delayTimeSec: fromFx.delayTimeSec + (toFx.delayTimeSec - fromFx.delayTimeSec) * t,
+				delayMix: fromFx.delayMix + (toFx.delayMix - fromFx.delayMix) * t,
+				delayFeedback: fromFx.delayFeedback! + ((toFx.delayFeedback ?? 0.3) - fromFx.delayFeedback!) * t,
+				reverbMix: fromFx.reverbMix + (toFx.reverbMix - fromFx.reverbMix) * t,
+				masterGain: fromFx.masterGain + (toFx.masterGain - fromFx.masterGain) * t
+			};
+			
+			// Update Engine with all interpolated params including Region
+			// This effectively scrubs audio across the file during transition!
+			state.engine?.setAllParams(interpG, interpFx, interpRegion);
+			
+			// Sincronizza il riverbero con l'XYPad durante l'interpolazione
+			xy.setReverbMix?.(interpFx.reverbMix);
+			
+			// Sincronizza il filtro cutoff con l'XYPad durante l'interpolazione
+			const cutoffWeight = calculateParamWeight('filterCutoffHz', interpXY);
+			xy.setFilterCutoff?.(interpFx.filterCutoffHz, cutoffWeight);
+			
+			// Sincronizza la densità con l'XYPad durante l'interpolazione
+			const densityWeight = calculateParamWeight('density', interpXY);
+			xy.setDensity?.(interpG.density, densityWeight);
+			
+			// UI
+			controls.setGranularUI(interpG);
+			controls.setFxUI(interpFx);
+			refreshParamTilesFromState();
+			if (step >= steps) {
+				clearInterval(recallTimer!);
+				recallTimer = null;
+			}
+		}, 16) as any as number;
+	}
 
 function hexToRgba(hex: string, alpha = 1): string {
 	const m = hex.replace('#', '');
@@ -1290,34 +1444,51 @@ if (state.activePadIndex != null) {
 	xy.setFilterCutoff?.(pad.effects.filterCutoffHz, 0);
 	xy.setDensity?.(pad.granular.density, 0);
 }
-function snapshotBaseFromCurrentPad() {
-	// snapshot current pad parameters as base
-	if (state.activePadIndex == null) return;
-	const pad = state.padParams.get(state.activePadIndex);
-	xyBaseGranular = { ...pad.granular };
-	xyBaseFx = { ...pad.effects };
-	// Sincronizza il riverbero con l'XYPad per controllare i simboli
-	xy.setReverbMix?.(pad.effects.reverbMix);
-	// Sincronizza il filtro cutoff con l'XYPad per controllare il colore ciano
-	xy.setFilterCutoff?.(pad.effects.filterCutoffHz, 0);
-	// Sincronizza la densità con l'XYPad per controllare l'animazione della griglia
-	xy.setDensity?.(pad.granular.density, 0);
-	// snapshot current selection position (normalized)
-	const sel = waveform.getSelection();
-	if (sel && state.buffer) {
-		const width = sel.end - sel.start;
-		const movable = Math.max(0, state.buffer.duration - width);
-		xyBaseSelectionPos = movable > 0 ? sel.start / movable : 0;
-	} else {
-		xyBaseSelectionPos = 0;
+	function snapshotBaseFromCurrentPad() {
+		// snapshot current pad parameters as base
+		if (state.activePadIndex == null) return;
+		const pad = state.padParams.get(state.activePadIndex);
+		xyBaseGranular = { ...pad.granular };
+		xyBaseFx = { ...pad.effects };
+		// Sincronizza il riverbero con l'XYPad per controllare i simboli
+		xy.setReverbMix?.(pad.effects.reverbMix);
+		
+		const padXY = pad.xy || { x: 0.5, y: 0.5 };
+		
+		// Sincronizza il filtro cutoff con l'XYPad per controllare il colore ciano
+		const cutoffWeight = calculateParamWeight('filterCutoffHz', padXY);
+		xy.setFilterCutoff?.(pad.effects.filterCutoffHz, cutoffWeight);
+		
+		// Sincronizza la densità con l'XYPad per controllare l'animazione della griglia
+		const densityWeight = calculateParamWeight('density', padXY);
+		xy.setDensity?.(pad.granular.density, densityWeight);
+		
+		// snapshot current selection position (normalized)
+		const sel = waveform.getSelection();
+		if (sel && state.buffer) {
+			const width = sel.end - sel.start;
+			const movable = Math.max(0, state.buffer.duration - width);
+			xyBaseSelectionPos = movable > 0 ? sel.start / movable : 0;
+		} else {
+			xyBaseSelectionPos = 0;
+		}
 	}
-}
 
 // resnapshot base on pad change (handled in updatePadGrid pad selection)
 // apply changes when moving
-xy.onChange((pos) => {
-	// Bilinear weights for 4 corners
-	const wTL = (1 - pos.x) * (1 - pos.y);
+	xy.onChange((pos) => {
+		// Update the stored XY position for the active pad
+		if (state.activePadIndex != null && !isXYMorphing) {
+			state.padParams.setXY(state.activePadIndex, pos);
+		}
+		
+		// Update motion panel cursor if active
+		if (motionCtrl) {
+			motionCtrl.setCursor(pos.x, pos.y);
+		}
+
+		// Bilinear weights for 4 corners
+		const wTL = (1 - pos.x) * (1 - pos.y);
 	const wTR = pos.x * (1 - pos.y);
 	const wBL = (1 - pos.x) * pos.y;
 	const wBR = pos.x * pos.y;

@@ -4,6 +4,7 @@ import type { EffectsParams } from '../effects/EffectsChain';
 export type PadParams = {
 	granular: GranularParams;
 	effects: EffectsParams;
+	xy: { x: number, y: number };
 };
 
 export function defaultGranular(): GranularParams {
@@ -17,7 +18,8 @@ export function defaultEffects(): EffectsParams {
 export function createPadParamStore(size: number) {
 	const store: PadParams[] = new Array(size).fill(0).map(() => ({
 		granular: defaultGranular(),
-		effects: defaultEffects()
+		effects: defaultEffects(),
+		xy: { x: 0.5, y: 0.5 }
 	}));
 
 	function get(index: number): PadParams {
@@ -27,7 +29,8 @@ export function createPadParamStore(size: number) {
 		const current = store[index];
 		store[index] = {
 			granular: { ...current.granular, ...(params.granular ?? {}) },
-			effects: { ...current.effects, ...(params.effects ?? {}) }
+			effects: { ...current.effects, ...(params.effects ?? {}) },
+			xy: params.xy ? { ...params.xy } : current.xy
 		};
 	}
 	function setGranular(index: number, granular: Partial<GranularParams>) {
@@ -36,13 +39,17 @@ export function createPadParamStore(size: number) {
 	function setEffects(index: number, fx: Partial<EffectsParams>) {
 		set(index, { effects: fx as EffectsParams });
 	}
+	function setXY(index: number, pos: { x: number, y: number }) {
+		set(index, { xy: pos });
+	}
 	function add() {
 		store.push({
 			granular: defaultGranular(),
-			effects: defaultEffects()
+			effects: defaultEffects(),
+			xy: { x: 0.5, y: 0.5 }
 		});
 	}
-	return { get, set, setGranular, setEffects, add };
+	return { get, set, setGranular, setEffects, setXY, add };
 }
 
 
