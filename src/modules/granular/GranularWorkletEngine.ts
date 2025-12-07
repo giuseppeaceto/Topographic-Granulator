@@ -123,6 +123,7 @@ export async function createGranularWorkletEngine(ctx: AudioContext): Promise<Gr
 				channels.push(copy);
 			}
 			
+            console.log('GranularWorkletEngine: Sending buffer to worklet, channels:', channels.length, 'length:', b.length);
 			try {
 				node.port.postMessage({ type: 'setBuffer', channels });
 			} catch (msgError) {

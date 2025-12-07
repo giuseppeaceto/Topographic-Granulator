@@ -22,6 +22,7 @@ export const PAD_ICONS = [
 type PadGridOptions = {
 	colors?: string[];
 	activeIndex?: number | null;
+	maxPads?: number;
 };
 
 export function createPadGrid(container: HTMLElement, regions: Array<Region | null>, opts: PadGridOptions = {}) {
@@ -29,6 +30,7 @@ export function createPadGrid(container: HTMLElement, regions: Array<Region | nu
 	let longPressTimer: number | null = null;
 	const colors = opts.colors ?? [];
 	const activeIndex = opts.activeIndex ?? null;
+	const maxPads = opts.maxPads ?? Infinity;
 
 	const callbacks: {
 		onPadPress?: (index: number) => void;
@@ -65,17 +67,21 @@ export function createPadGrid(container: HTMLElement, regions: Array<Region | nu
 			container.appendChild(pad);
 		}
 
-		// Add button
-		const addBtn = document.createElement('div');
-		addBtn.className = 'pad add-pad-btn';
-		addBtn.title = 'Add Pad';
-		addBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.4"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`;
-		addBtn.style.borderStyle = 'dashed';
-		addBtn.style.opacity = '0.7';
-		addBtn.addEventListener('click', () => {
-			callbacks.onAdd?.();
-		});
-		container.appendChild(addBtn);
+		// Add button (only if under maxPads)
+		if (regions.length < maxPads) {
+			const addBtn = document.createElement('div');
+			addBtn.className = 'pad add-pad-btn';
+			addBtn.title = 'Add Pad';
+			addBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.4"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`;
+			addBtn.style.borderStyle = 'dashed';
+			addBtn.style.opacity = '0.7';
+			addBtn.addEventListener('click', () => {
+				if (regions.length < maxPads) {
+					callbacks.onAdd?.();
+				}
+			});
+			container.appendChild(addBtn);
+		}
 	}
 
 	function wire(pad: HTMLDivElement, index: number) {

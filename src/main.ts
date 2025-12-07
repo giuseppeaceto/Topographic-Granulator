@@ -4,14 +4,16 @@ import { loadAudioFile } from './modules/audio/AudioFileLoader';
 import { createRegionStore, type Region } from './modules/editor/RegionStore';
 import { createEffectsChain, type EffectsChain } from './modules/effects/EffectsChain';
 import { createGranularWorkletEngine, type GranularWorkletEngine } from './modules/granular/GranularWorkletEngine';
+import { VoiceManager } from './modules/audio/VoiceManager';
 import { createPadGrid, PAD_ICONS } from './modules/ui/PadGrid';
 import { setupControls } from './modules/ui/Controls';
 import { createWaveformView } from './modules/ui/WaveformView';
 import { createXYPadThree } from './modules/ui/XYPadThree';
 import { createMotionPanel } from './modules/ui/MotionPanel';
 import { PARAMS, type ParamId } from './modules/ui/ParamRegistry';
+import { ParameterMapper } from './modules/utils/ParameterMapper';
 import { MidiManager, type MidiMapping, loadMappings, saveMappings } from './modules/midi/MidiManager';
-import { createPadParamStore, defaultEffects } from './modules/editor/PadParamStore';
+import { createPadParamStore, defaultEffects, defaultGranular } from './modules/editor/PadParamStore';
 import type { GranularParams } from './modules/granular/GranularWorkletEngine';
 import type { EffectsParams } from './modules/effects/EffectsChain';
 import { createFloatingPanelManager } from './modules/ui/FloatingPanelManager';
@@ -23,7 +25,7 @@ type AppState = {
 	contextMgr: ReturnType<typeof createAudioContextManager>;
 	buffer: AudioBuffer | null;
 	effects: EffectsChain | null;
-	engine: GranularWorkletEngine | null;
+	voiceManager: VoiceManager | null;
 	regions: ReturnType<typeof createRegionStore>;
 	activePadIndex: number | null;
 	padParams: ReturnType<typeof createPadParamStore>;
@@ -42,7 +44,7 @@ const state: AppState = {
 	contextMgr: createAudioContextManager(),
 	buffer: null,
 	effects: null,
-	engine: null,
+	voiceManager: null,
 	regions: createRegionStore(1),
 	activePadIndex: null,
 	padParams: createPadParamStore(1),
@@ -144,6 +146,7 @@ const padEditModal = document.getElementById('padEditModal') as HTMLDivElement;
 const padIconGrid = document.getElementById('padIconGrid') as HTMLDivElement;
 const padEditCancel = document.getElementById('padEditCancel') as HTMLButtonElement;
 const padEditSave = document.getElementById('padEditSave') as HTMLButtonElement;
+const padEditDelete = document.getElementById('padEditDelete') as HTMLButtonElement | null;
 
 let currentEditIndex: number | null = null;
 let pendingRegionUpdate: { start: number, end: number } | null = null;
@@ -154,6 +157,9 @@ function openPadEditModal(index: number, pendingRegion: { start: number, end: nu
 	pendingRegionUpdate = pendingRegion;
 	const region = state.regions.get(index);
 	selectedIconIndex = region?.iconIndex ?? null;
+	if (padEditDelete) {
+		padEditDelete.disabled = !region;
+	}
 	
 	padIconGrid.innerHTML = '';
 	PAD_ICONS.forEach((icon, i) => {
@@ -209,6 +215,9 @@ function closePadEditModal() {
     }, 200);
 	currentEditIndex = null;
     pendingRegionUpdate = null;
+	if (padEditDelete) {
+		padEditDelete.disabled = false;
+	}
 }
 
 if (padEditCancel) padEditCancel.addEventListener('click', closePadEditModal);
@@ -245,6 +254,7 @@ if (padEditSave) padEditSave.addEventListener('click', () => {
         const effectiveIconIndex = region.iconIndex !== undefined ? region.iconIndex : currentEditIndex;
         const color = PAD_COLORS[effectiveIconIndex % PAD_COLORS.length];
         waveform.setColor(color, hexToRgba(color, 0.18));
+        if (motionCtrl) motionCtrl.setColor(color);
         waveform.setSelection(region.start, region.end);
     }
 
@@ -253,6 +263,66 @@ if (padEditSave) padEditSave.addEventListener('click', () => {
     
     closePadEditModal();
 });
+
+function deletePad(index: number) {
+	// Stop everything to avoid stale voices referencing shifted indices
+	state.voiceManager?.stopAll();
+	if (motionCtrl && motionCtrl.isPlaying()) {
+		motionCtrl.stop();
+	}
+
+	// Remove pad data (regions + params) and shrink stores
+	state.regions.remove(index);
+	state.padParams.remove(index);
+
+	// Clear MIDI mappings for this pad and shift higher indices down
+	state.midi.mappings = state.midi.mappings
+		.filter(m => m.targetId !== `pad:${index}`)
+		.map(m => {
+			if (m.targetId.startsWith('pad:')) {
+				const idx = Number(m.targetId.split(':')[1]);
+				if (idx > index) {
+					return { ...m, targetId: `pad:${idx - 1}` };
+				}
+			}
+			return m;
+		});
+	saveMappings(state.midi.mappings);
+
+	// Adjust active pad index
+	if (state.activePadIndex !== null) {
+		if (state.activePadIndex === index) {
+			state.activePadIndex = null;
+		} else if (state.activePadIndex > index) {
+			state.activePadIndex = state.activePadIndex - 1;
+		}
+	}
+
+	// Clear waveform selection if no active pad
+	if (state.activePadIndex === null) {
+		waveform.clearSelection();
+		updateSelPosUI();
+		if (xy && xy.setPosition) xy.setPosition(0.5, 0.5);
+	}
+
+	updatePadGrid();
+	if (getXYMode() === 'pads') {
+		populateParamSelect(customSelectTL);
+		populateParamSelect(customSelectTR);
+		populateParamSelect(customSelectBL);
+		populateParamSelect(customSelectBR);
+		refreshXYCornerLabels();
+	}
+
+	closePadEditModal();
+}
+
+if (padEditDelete) {
+	padEditDelete.addEventListener('click', () => {
+		if (currentEditIndex === null) return;
+		deletePad(currentEditIndex);
+	});
+}
 
 // Initialize Floating Panel Manager
 const panelManager = createFloatingPanelManager();
@@ -315,18 +385,59 @@ if (motionPanel) {
 		clearBtn: document.getElementById('motionClearBtn') as HTMLButtonElement,
 		loopModeSelect: document.getElementById('motionLoopMode') as HTMLSelectElement,
 		speedInput: document.getElementById('motionSpeed') as HTMLInputElement,
+        externalClock: true, // Let VoiceManager drive the animation
 		onPosition: (x, y) => {
 			if (xy && xy.setPosition) {
 				xy.setPosition(x, y);
 			}
-		}
+            // If recording, we might want to update visuals, but we don't drive engine here.
+		},
+		onPathChange: (path) => {
+			if (state.activePadIndex != null) {
+				state.padParams.setMotionPath(state.activePadIndex, path);
+                // Retrigger to apply new path to engine immediately
+                triggerPad(state.activePadIndex);
+			}
+		},
+		onPlayStateChange: (isPlaying) => {
+            // Visual feedback only, engine handles playback
+            // If user hits Play on motion panel, ensure pad is triggered?
+            if (isPlaying && state.activePadIndex != null) {
+                if (!state.voiceManager?.isPadPlaying(state.activePadIndex)) {
+                    triggerPad(state.activePadIndex);
+                }
+            }
+		},
+        onSpeedChange: (speed) => {
+             if (state.activePadIndex != null) {
+                // Update store
+                const current = state.padParams.get(state.activePadIndex);
+                state.padParams.setMotionParams(state.activePadIndex, current.motionMode || 'loop', speed);
+                // Retrigger to update engine
+                triggerPad(state.activePadIndex);
+             }
+        }
+	});
+
+    // Listen for mode changes (Loop, PingPong...) from the DOM element directly or add callback to MotionPanel?
+    // MotionPanel has internal listener but exposed `loopModeSelect`.
+    const motionLoopSelect = document.getElementById('motionLoopMode') as HTMLSelectElement;
+    motionLoopSelect?.addEventListener('change', () => {
+         if (state.activePadIndex != null) {
+            const current = state.padParams.get(state.activePadIndex);
+            const mode = motionLoopSelect.value as any;
+            state.padParams.setMotionParams(state.activePadIndex, mode, current.motionSpeed || 1.0);
+             // Retrigger to update engine
+            triggerPad(state.activePadIndex);
+        }
 	});
 
 	// Stop motion playback if user interacts with main XY pad
 	xyCanvas.addEventListener('pointerdown', () => {
-		if (motionCtrl && motionCtrl.isPlaying()) {
-			motionCtrl.stop();
-		}
+		// if (motionCtrl && motionCtrl.isPlaying()) {
+		// 	motionCtrl.stop();
+		// }
+        // Now handled by Manual Override logic
 	});
 }
 
@@ -346,6 +457,34 @@ function setXYMode(mode: 'params' | 'pads') {
 			xyModeParamsBtn.classList.remove('active');
 			xyModePadsBtn.classList.add('active');
 		}
+	}
+}
+
+// Force XY cursor to the stored position for a pad, optionally firing change handlers
+function syncXYToPad(index: number, triggerChange = false) {
+	const pad = state.padParams.get(index);
+	const pos = pad?.xy || { x: 0.5, y: 0.5 };
+	if (!xy) return;
+	if (triggerChange && xy.setPosition) {
+		xy.setPosition(pos.x, pos.y);
+	} else if (xy.setPositionSilent) {
+		xy.setPositionSilent(pos.x, pos.y);
+	}
+	if (motionCtrl) {
+		motionCtrl.setCursor(pos.x, pos.y);
+	}
+    
+    // Sync Motion Panel Controls
+    if (motionCtrl) {
+        if (pad.motionPath) motionCtrl.setPath(pad.motionPath);
+        else motionCtrl.setPath([]);
+        
+        // Sync Inputs
+        const speedInput = document.getElementById('motionSpeed') as HTMLInputElement;
+        if (speedInput) speedInput.value = String(pad.motionSpeed ?? 1.0);
+        
+        const loopSelect = document.getElementById('motionLoopMode') as HTMLSelectElement;
+        if (loopSelect) loopSelect.value = pad.motionMode ?? 'loop';
 	}
 }
 // Flag to prevent saving selection to pad during XY morphing
@@ -368,10 +507,13 @@ waveform.onSelection((sel) => {
 			updatePadGrid();
 		}
 		// Update engine region in real-time
-		if (state.engine && state.buffer) {
-			state.engine.setRegion(sel.start, sel.end);
-			// ensure immediate response while dragging
-			state.engine.trigger();
+		if (state.voiceManager && state.buffer && state.activePadIndex != null) {
+            const voice = state.voiceManager.getActiveVoiceForPad(state.activePadIndex);
+            if (voice) {
+			    voice.engine.setRegion(sel.start, sel.end);
+			    // ensure immediate response while dragging
+			    voice.engine.trigger();
+            }
 		}
 	} else {
 		selStartEl.textContent = '0.00';
@@ -386,6 +528,7 @@ unlockBtn.addEventListener('click', async () => {
 });
 
 // ---------- Audio/Video Recording ----------
+
 let isVideoRecording = false;
 
 function updateRecordingUI() {
@@ -518,6 +661,15 @@ if (clearSelectionBtn) {
 		// clear waveform selection and remove region for active pad
 		waveform.clearSelection();
 		if (state.activePadIndex != null) {
+            // Stop audio for this pad
+            if (state.voiceManager) {
+                state.voiceManager.stopPad(state.activePadIndex);
+            }
+            // Stop motion playback if active
+            if (motionCtrl && motionCtrl.isPlaying()) {
+                motionCtrl.stop();
+            }
+            
 			state.regions.set(state.activePadIndex, null as any);
 			updatePadGrid();
 			// Update XY pad dropdowns if in pad mode
@@ -556,8 +708,23 @@ async function initMIDI(): Promise<boolean> {
 			const mapping = state.midi.mappings.find(m => m.type === 'note' && m.channel === e.channel && m.controller === e.num);
 			if (mapping && mapping.targetId.startsWith('pad:')) {
 				const index = Number(mapping.targetId.split(':')[1]);
-				const region = state.regions.get(index);
-				if (region && state.buffer) triggerRegion(region);
+				// Aggiorna lo stato attivo come se avessimo premuto il pad nella UI
+				const prevIndex = state.activePadIndex;
+				state.activePadIndex = index;
+				snapshotBaseFromCurrentPad();
+
+				if (state.recallPerPad) {
+					recallPadParams(index, 0, prevIndex ?? null);
+					const region = state.regions.get(index);
+					const effectiveIndex = region?.iconIndex !== undefined ? region.iconIndex : index;
+					const c = PAD_COLORS[effectiveIndex % PAD_COLORS.length];
+					waveform.setColor(c, hexToRgba(c, 0.18));
+				} else {
+					recallWaveformSelection(index);
+				}
+				updateSelPosUI();
+
+				triggerPad(index);
 			} else if (state.midi.learnEnabled && state.midi.pendingTarget?.startsWith('pad:')) {
 				state.midi.mappings = state.midi.mappings.filter(m => m.targetId !== state.midi.pendingTarget);
 				state.midi.mappings.push({ type: 'note', channel: e.channel, controller: e.num, targetId: state.midi.pendingTarget });
@@ -724,6 +891,12 @@ fileInput.addEventListener('change', async (e) => {
 		// If no active pad, select the first one by default
 		if (state.activePadIndex === null && state.regions.getAll().length > 0) {
 			state.activePadIndex = 0;
+            
+            // If the first pad is not assigned, assign the full buffer to it
+            if (!state.regions.get(0)) {
+                state.regions.set(0, { start: 0, end: loaded.audioBuffer.duration, name: 'Full' });
+            }
+
 			// Also ensure we are synced with this pad's parameters
 			recallPadParams(0, 0); 
 		}
@@ -732,11 +905,10 @@ fileInput.addEventListener('change', async (e) => {
 		bufferDurEl.textContent = `Duration: ${loaded.audioBuffer.duration.toFixed(2)}s`;
 		updateSelPosUI();
 		
-		if (state.engine) {
+		if (state.voiceManager) {
 			console.log('Setting buffer to engine...');
 			try {
-				await state.engine.setBuffer(loaded.audioBuffer);
-				state.engine.setRegion(0, loaded.audioBuffer.duration);
+				await state.voiceManager.setBuffer(loaded.audioBuffer);
 				console.log('Buffer set to engine');
 			} catch (err) {
 				console.error('Error setting buffer to engine:', err);
@@ -757,23 +929,19 @@ function ensureAudioReady() {
 	return state.contextMgr.unlock();
 }
 
-async function ensureEngine() { // Changed to async
-	if (!state.engine) {
-		// init worklet engine asynchronously
+async function ensureEngine() {
+	if (!state.voiceManager) {
 		try {
-			const eng = await createGranularWorkletEngine(state.contextMgr.audioContext);
-			state.engine = eng;
+			state.voiceManager = new VoiceManager(state.contextMgr.audioContext, 4);
 			ensureEffects();
-			// Push current FX params into the Rust engine
-			applyFxToEngine({});
-			state.engine?.connect(state.effects!.input);
+			await state.voiceManager.init(state.effects!.input, (index) => state.padParams.get(index));
+			
 			if (state.buffer) {
-				state.engine.setBuffer(state.buffer);
-				state.engine.setRegion(0, state.buffer.duration);
+				await state.voiceManager.setBuffer(state.buffer);
 			}
 		} catch (err) {
-			console.error('Worklet error:', err);
-			throw err; // Re-throw to handle in caller
+			console.error('VoiceManager error:', err);
+			throw err;
 		}
 	}
 }
@@ -781,7 +949,13 @@ async function ensureEngine() { // Changed to async
 function ensureEffects() {
 	if (!state.effects) {
 		state.effects = createEffectsChain(state.contextMgr.audioContext);
-		state.engine?.connect(state.effects.input);
+		// state.engine no longer exists here. VoiceManager connects voices to destination directly (or effects input)
+        // But wait, VoiceManager needs to connect to effects input if we want to record!
+        // In init(), we passed state.effects.input.
+        // But ensureEffects is called BEFORE init usually.
+        // Ah, ensureEffects creates state.effects.
+        // VoiceManager init takes destination.
+        
 		state.effects.output.connect(state.contextMgr.audioContext.destination);
 	}
 	// Initialize or update recorder when effects are ready
@@ -797,13 +971,24 @@ function getActiveFxParams(): EffectsParams {
 	return defaultEffects();
 }
 
+// Helper to get params for a pad (or defaults)
+function getPadParams(index: number) {
+	return state.padParams.get(index);
+}
+
 function applyFxToEngine(patch: Partial<EffectsParams>) {
+	// This function is now primarily for updating the UI/State
+    // VoiceManager handles applying FX to voices during trigger/update
 	const base = getActiveFxParams();
 	const merged = { ...base, ...patch };
 	if (state.activePadIndex != null) {
 		state.padParams.setEffects(state.activePadIndex, merged);
+        // Update active voice if any
+        const voice = state.voiceManager?.getActiveVoiceForPad(state.activePadIndex);
+        if (voice) {
+            voice.engine.setEffectParams(merged);
+        }
 	}
-	state.engine?.setEffectParams(merged);
 	return merged;
 }
 
@@ -811,8 +996,9 @@ const PAD_COLORS = ['#A1E34B', '#66D9EF', '#FDBC40', '#FF7AA2', '#7C4DFF', '#00E
 
 function updatePadGrid() {
 	padGridEl.innerHTML = '';
-	const padGrid = createPadGrid(padGridEl, state.regions.getAll(), { colors: PAD_COLORS, activeIndex: state.activePadIndex });
+	const padGrid = createPadGrid(padGridEl, state.regions.getAll(), { colors: PAD_COLORS, activeIndex: state.activePadIndex, maxPads: 3 });
 	padGrid.onAdd = () => {
+		if (state.regions.getAll().length >= 3) return;
 		state.regions.add();
 		state.padParams.add();
 		updatePadGrid();
@@ -833,7 +1019,14 @@ function updatePadGrid() {
 		}
 		const prevIndex = state.activePadIndex;
 		state.activePadIndex = index;
+
+		// POLYPHONY: Do NOT stop other pads when switching focus.
+		// state.voiceManager?.stopAll(); 
+        
+        // IMPORTANT: Snapshot base parameters from the new pad immediately
 		snapshotBaseFromCurrentPad();
+		// Re-align XY cursor to this pad so levels/mix start from the saved position
+		syncXYToPad(index, true);
 		
 		// If smooth recall is enabled, handle everything in recallPadParams
 		if (state.recallPerPad) {
@@ -843,21 +1036,53 @@ function updatePadGrid() {
 			const effectiveIndex = region?.iconIndex !== undefined ? region.iconIndex : index;
 			const c = PAD_COLORS[effectiveIndex % PAD_COLORS.length];
 			waveform.setColor(c, hexToRgba(c, 0.18));
+            if (motionCtrl) motionCtrl.setColor(c);
 			
-			// Ensure engine is running
-			if (state.engine && state.buffer) {
-				state.engine.trigger();
+			// Ensure engine is running IF it's not already playing
+			if (state.voiceManager && state.buffer) {
+                // Only trigger if not already playing to allow seamless "focus switching"
+                if (!state.voiceManager.isPadPlaying(index)) {
+                triggerPad(index);
+                }
 			}
+
+            // Start motion playback if exists (after a short delay to let recall start?)
+            // Or just start it. recallPadParams will set the path. 
+            // We need to explicitly tell motionCtrl to play.
+            const padParams = state.padParams.get(index);
+            if (padParams?.motionPath && padParams.motionPath.length > 0 && motionCtrl) {
+                // VISUALIZATION UPDATE ONLY
+                // The visualization loop handles cursor position.
+                // We just ensure the path is loaded.
+                motionCtrl.setPath(padParams.motionPath);
+            }
+
 		} else {
 			// Instant recall behavior
 			const region = state.regions.get(index);
 			const effectiveIndex = region?.iconIndex !== undefined ? region.iconIndex : index;
 			const c = PAD_COLORS[effectiveIndex % PAD_COLORS.length];
 			waveform.setColor(c, hexToRgba(c, 0.18));
+            if (motionCtrl) motionCtrl.setColor(c);
 			recallWaveformSelection(index);
 			updateSelPosUI();
 			
-			if (region && state.buffer) triggerRegion(region);
+			if (region && state.buffer) {
+                 if (!state.voiceManager?.isPadPlaying(index)) {
+                    triggerPad(index);
+                 }
+            }
+
+            // Also load and play motion path
+            const padParams = state.padParams.get(index);
+            if (motionCtrl) {
+                if (padParams?.motionPath) {
+                    motionCtrl.setPath(padParams.motionPath);
+                    // VISUALIZATION handled by loop, no need to call play()
+                } else {
+                    motionCtrl.setPath([]);
+                }
+            }
 		}
 	};
 	padGrid.onPadLongPress = (index) => {
@@ -866,8 +1091,13 @@ function updatePadGrid() {
 			highlightPending(state.midi.pendingTarget);
 			return;
 		}
+		// POLYPHONY: Do not stop others on edit
+		// state.voiceManager?.stopAll();
+
 		const prevIndex = state.activePadIndex;
 		state.activePadIndex = index;
+        
+        // IMPORTANT: Snapshot base parameters from the new pad immediately
 		snapshotBaseFromCurrentPad();
 		
 		// colorize waveform for this pad
@@ -875,6 +1105,7 @@ function updatePadGrid() {
 		const effectiveIndex = region?.iconIndex !== undefined ? region.iconIndex : index;
 		const c = PAD_COLORS[effectiveIndex % PAD_COLORS.length];
 		waveform.setColor(c, hexToRgba(c, 0.18));
+        if (motionCtrl) motionCtrl.setColor(c);
 		
 		if (state.recallPerPad) {
 			recallPadParams(index, 300, prevIndex);
@@ -896,6 +1127,8 @@ function updatePadGrid() {
 			// Edit existing pad without changing region
 			openPadEditModal(index, null);
 		}
+		// Re-align XY cursor to this pad so levels/mix start from the saved position
+		syncXYToPad(index, true);
 		updatePadGrid();
 		// Update XY pad dropdowns if in pad mode
 		if (getXYMode() === 'pads') {
@@ -909,11 +1142,196 @@ function updatePadGrid() {
 }
 
 async function triggerRegion(region: Region) {
-	if (!state.buffer || !state.engine) return;
-	await state.engine.setBuffer(state.buffer);
-	state.engine.setRegion(region.start, region.end);
-	state.engine.trigger();
+	if (!state.buffer || !state.voiceManager) return;
+	await state.voiceManager.setBuffer(state.buffer); // Optimization: only if buffer changed? VoiceManager handles logic
+    
+    // This function is called by MIDI or other triggers that aren't "Pad Press"
+    // We need to find WHICH pad corresponds to this region?
+    // Or is this function called with a region object from a pad?
+    // Look at usage:
+    // Line 559: const region = state.regions.get(index); ... triggerRegion(region);
+    // So we know the index. We should pass the index to triggerRegion.
+    
+    // But wait, triggerRegion signature is just (region: Region).
+    // I should update it to accept index.
 }
+
+// Updated signature
+async function triggerPad(index: number) {
+    if (!state.buffer || !state.voiceManager) return;
+    const region = state.regions.get(index);
+    if (!region) return;
+    
+    // Check if pad is already playing, if so stop it (toggle behavior) or just stop previous instances (retrigger behavior)
+    // Let's implement retrigger behavior (monophonic per pad): stop old instance, start new.
+    // This prevents "layering" the same pad on itself.
+    if (state.voiceManager.isPadPlaying(index)) {
+        state.voiceManager.stopPad(index);
+    }
+    
+    const params = state.padParams.get(index);
+    
+    // Calculate corner mapping for automation
+    const corners = {
+        tl: customSelectTL?.getValue() || '',
+        tr: customSelectTR?.getValue() || '',
+        bl: customSelectBL?.getValue() || '',
+        br: customSelectBR?.getValue() || ''
+    };
+
+    // Resolve pad parameters for corners if in Pad Mode
+    let padMorphIndices = undefined;
+    if (getXYMode() === 'pads') {
+        const getPadIdFromCorner = (cornerVal: string) => {
+            if (cornerVal.startsWith('pad:')) {
+                return Number(cornerVal.split(':')[1]);
+            }
+            return null;
+        };
+        
+        padMorphIndices = {
+            tl: getPadIdFromCorner(customSelectTL?.getValue() || ''),
+            tr: getPadIdFromCorner(customSelectTR?.getValue() || ''),
+            bl: getPadIdFromCorner(customSelectBL?.getValue() || ''),
+            br: getPadIdFromCorner(customSelectBR?.getValue() || '')
+        };
+    }
+
+    state.voiceManager.trigger(
+        index,
+        region,
+        params.granular,
+        params.effects,
+        params.xy || { x: 0.5, y: 0.5 },
+        params.motionPath,
+        params.motionMode || 'loop',
+        params.motionSpeed || 1.0,
+        corners,
+        padMorphIndices
+    );
+}
+
+// ---------- VISUALIZATION LOOP ----------
+// Sync UI with Audio Engine state (Active Pad only)
+function startVisualizationLoop() {
+    const loop = () => {
+        if (state.voiceManager) {
+            // 1. Update Ghost Cursors (Background Polyphony)
+            if (xy.setGhostPositions) {
+                const allPositions = state.voiceManager.getAllVoicePositions();
+                // Filter out the active pad from ghosts (it has the main cursor)
+                const ghosts = allPositions.filter(p => p.colorIndex !== state.activePadIndex);
+                xy.setGhostPositions(ghosts);
+            }
+
+            // 2. Update Active Pad Cursor & Visuals
+            if (state.activePadIndex != null) {
+                const pos = state.voiceManager.getVoiceCurrentXY(state.activePadIndex);
+                
+                if (pos) {
+                    // Update XY Pad Cursor (Silent update to avoid feedback loop)
+                    // Only if user is NOT dragging (Manual Override handles its own UI update)
+                    if (!xyUserDragging && xy.setPositionSilent) {
+                        xy.setPositionSilent(pos.x, pos.y);
+                    }
+
+                    // Update Motion Panel Cursor
+                    if (motionCtrl) {
+                        motionCtrl.setCursor(pos.x, pos.y);
+                    }
+                    
+                    // Update Param Knobs / Visuals based on current position
+                    if (!xyUserDragging) {
+                         updateVisualsFromXY(pos.x, pos.y);
+                    }
+                }
+            }
+        }
+        requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+}
+
+// Helper to update UI visuals (Knobs, Colors) based on XY position
+// Extracted from the old xy.onChange
+function updateVisualsFromXY(x: number, y: number) {
+    if (state.activePadIndex == null) return;
+    
+    // Ensure base snapshot exists
+    if (xyBaseGranular == null || xyBaseFx == null) {
+        snapshotBaseFromCurrentPad();
+    }
+    if (!xyBaseGranular || !xyBaseFx) return;
+
+    const mode = getXYMode();
+    
+    if (mode === 'pads') {
+        // (Pads mode visualization logic - simplified or same as before)
+        // ... for now skip detailed visual updates for pads mode in loop to save perf, 
+        // or just rely on the fact that pads mode usually doesn't have "Base Params" in the same way.
+        // Let's implement basic param update if needed, but for now leave blank or copy logic.
+        return; 
+    }
+
+    // Params Mode Visualization
+    
+    // 1. Calculate Weights
+    const weights = ParameterMapper.calculateWeights(x, y);
+    
+    // 2. Map Parameters using shared logic
+    const cornerMapping = {
+        tl: customSelectTL?.getValue() || '',
+        tr: customSelectTR?.getValue() || '',
+        bl: customSelectBL?.getValue() || '',
+        br: customSelectBR?.getValue() || ''
+    };
+    
+    const baseParams = {
+        granular: xyBaseGranular,
+        effects: xyBaseFx,
+        selectionPos: xyBaseSelectionPos ?? 0
+    };
+
+    const { granular: granularUpdate, effects: fxUpdate } = ParameterMapper.mapParams(
+        weights,
+        baseParams,
+        cornerMapping
+    );
+    
+    // 3. Update Knobs UI
+    controls.setGranularUI(granularUpdate);
+    controls.setFxUI(fxUpdate);
+    refreshParamTilesFromState(); // Updates the knobs rotation
+    
+    // 4. Update XY Pad Visuals (Density, Color, Reverb)
+    // We need to know "influence" for specific parameters for visual cues
+    // Re-calculate basic influence locally just for these 3 specific visuals 
+    // (Optimization: could expose influence map from Mapper if needed, but this is fast enough)
+    
+    // Helper to sum weights for a specific param ID from corners
+    const getInfluence = (id: string) => {
+        let sum = 0;
+        if (cornerMapping.tl === id) sum += weights.tl;
+        if (cornerMapping.tr === id) sum += weights.tr;
+        if (cornerMapping.bl === id) sum += weights.bl;
+        if (cornerMapping.br === id) sum += weights.br;
+        return sum;
+    };
+
+    if (granularUpdate.density != null) {
+         const densityWeight = getInfluence('density');
+         xy.setDensity?.(granularUpdate.density, densityWeight);
+    }
+    if (fxUpdate.reverbMix != null) {
+        xy.setReverbMix?.(fxUpdate.reverbMix);
+    }
+    if (fxUpdate.filterCutoffHz != null) {
+        const cutoffWeight = getInfluence('filterCutoffHz');
+        xy.setFilterCutoff?.(fxUpdate.filterCutoffHz, cutoffWeight);
+    }
+}
+
+startVisualizationLoop();
 
 const controls = setupControls({
 	onParams: (params) => {
@@ -921,8 +1339,10 @@ const controls = setupControls({
 		// persist to active pad
 		if (state.activePadIndex != null) {
 			state.padParams.setGranular(state.activePadIndex, params as GranularParams);
+            // Update active voice
+            const voice = state.voiceManager?.getActiveVoiceForPad(state.activePadIndex);
+            if (voice) voice.engine.setParams(params);
 		}
-		state.engine?.setParams(params);
 	},
 	onFX: (fx) => {
 		ensureEngine();
@@ -959,13 +1379,37 @@ updatePadGrid();
 		// cancel any ongoing transition
 		if (recallTimer != null) { clearInterval(recallTimer); recallTimer = null; }
 		
+        // Sync Motion Panel State
+        if (motionCtrl) {
+            // Load Path
+            if (target.motionPath) {
+            motionCtrl.setPath(target.motionPath);
+            } else {
+            motionCtrl.setPath([]);
+            }
+            
+            // Check if this pad is currently playing a motion path
+            // And ensure motion path exists (otherwise playing makes no sense)
+            const isVoiceActive = state.voiceManager?.isPadPlaying(index) ?? false;
+            const hasPath = target.motionPath && target.motionPath.length > 0;
+            const shouldBePlaying = isVoiceActive && hasPath;
+
+            // Sync UI state
+            motionCtrl.setPlaybackState(shouldBePlaying ? true : false);
+        }
+
 		const targetXY = target.xy || { x: 0.5, y: 0.5 };
 
 		// If duration is 0 or very short, skip interpolation and set immediately (optimizes manual pad switch)
 		if (durationMs < 16) {
 			const region = state.regions.get(index);
 			const safeRegion = region ? { start: region.start, end: region.end } : { start: 0, end: state.buffer?.duration || 0 };
-			state.engine?.setAllParams(target.granular, target.effects, safeRegion);
+			
+            // Update ACTIVE voice if exists (for visual feedback? No, for sound)
+            const voice = state.voiceManager?.getActiveVoiceForPad(index);
+            if (voice) {
+                voice.engine.setAllParams(target.granular, target.effects, safeRegion);
+            }
 			
 			// Visual updates for instant recall
 			if (safeRegion.end > 0) waveform.setSelection(safeRegion.start, safeRegion.end);
@@ -1062,7 +1506,10 @@ updatePadGrid();
 			
 			// Update Engine with all interpolated params including Region
 			// This effectively scrubs audio across the file during transition!
-			state.engine?.setAllParams(interpG, interpFx, interpRegion);
+            const voice = state.voiceManager?.getActiveVoiceForPad(index);
+            if (voice) {
+			    voice.engine.setAllParams(interpG, interpFx, interpRegion);
+            }
 			
 			// Sincronizza il riverbero con l'XYPad durante l'interpolazione
 			xy.setReverbMix?.(interpFx.reverbMix);
@@ -1217,6 +1664,15 @@ customSelectBR = createCustomSelect({
 let xyBaseGranular: GranularParams | null = null;
 let xyBaseFx: EffectsParams | null = null;
 let xyBaseSelectionPos: number | null = null; // 0..1 normalized along movable range
+// Track manual drag on XY pad to allow overriding motion automation safely
+let xyUserDragging = false;
+if (xyCanvas) {
+	xyCanvas.addEventListener('pointerdown', () => { xyUserDragging = true; });
+	const stopDrag = () => { xyUserDragging = false; };
+	xyCanvas.addEventListener('pointerup', stopDrag);
+	xyCanvas.addEventListener('pointerleave', stopDrag);
+	xyCanvas.addEventListener('pointercancel', stopDrag);
+}
 
 function refreshXYCornerLabels() {
 	const mode = getXYMode();
@@ -1317,13 +1773,21 @@ type KnobConfig = {
 	format: (v: number) => string;
 };
 
+// Helper to update granular params on active voice
+function updateActiveVoiceGranular(p: Partial<GranularParams>) {
+    const voice = state.activePadIndex != null ? state.voiceManager?.getActiveVoiceForPad(state.activePadIndex) : null;
+    if (voice) {
+        voice.engine.setParams(p);
+    }
+}
+
 const knobConfigs: KnobConfig[] = [
 	{
 		id: 'pitch', min: -12, max: 12, step: 1,
 		get: () => (state.padParams.get(state.activePadIndex ?? 0).granular.pitchSemitones),
 		set: (v) => {
 			const p: any = { pitchSemitones: Math.round(v) };
-			state.engine?.setParams(p);
+			updateActiveVoiceGranular(p);
 			if (state.activePadIndex != null) state.padParams.setGranular(state.activePadIndex, p);
 			controls.setGranularUI(p);
 		},
@@ -1334,7 +1798,7 @@ const knobConfigs: KnobConfig[] = [
 		get: () => (state.padParams.get(state.activePadIndex ?? 0).granular.density),
 		set: (v) => {
 			const p: any = { density: Math.round(v) };
-			state.engine?.setParams(p);
+			updateActiveVoiceGranular(p);
 			if (state.activePadIndex != null) state.padParams.setGranular(state.activePadIndex, p);
 			controls.setGranularUI(p);
 			// Aggiorna l'animazione della griglia quando cambia la densità (peso 0 perché non viene da XYPad)
@@ -1347,7 +1811,7 @@ const knobConfigs: KnobConfig[] = [
 		get: () => (state.padParams.get(state.activePadIndex ?? 0).granular.grainSizeMs),
 		set: (v) => {
 			const p: any = { grainSizeMs: Math.round(v) };
-			state.engine?.setParams(p);
+			updateActiveVoiceGranular(p);
 			if (state.activePadIndex != null) state.padParams.setGranular(state.activePadIndex, p);
 			controls.setGranularUI(p);
 		},
@@ -1358,7 +1822,7 @@ const knobConfigs: KnobConfig[] = [
 		get: () => (state.padParams.get(state.activePadIndex ?? 0).granular.randomStartMs),
 		set: (v) => {
 			const p: any = { randomStartMs: Math.round(v) };
-			state.engine?.setParams(p);
+			updateActiveVoiceGranular(p);
 			if (state.activePadIndex != null) state.padParams.setGranular(state.activePadIndex, p);
 			controls.setGranularUI(p);
 		},
@@ -1565,8 +2029,11 @@ if (state.activePadIndex != null) {
 		// snapshot current pad parameters as base
 		if (state.activePadIndex == null) return;
 		const pad = state.padParams.get(state.activePadIndex);
-		xyBaseGranular = { ...pad.granular };
-		xyBaseFx = { ...pad.effects };
+        
+        // Deep copy to prevent reference issues if pad params are mutated elsewhere
+		xyBaseGranular = JSON.parse(JSON.stringify(pad.granular));
+		xyBaseFx = JSON.parse(JSON.stringify(pad.effects));
+		
 		// Sincronizza il riverbero con l'XYPad per controllare i simboli
 		xy.setReverbMix?.(pad.effects.reverbMix);
 		
@@ -1591,206 +2058,50 @@ if (state.activePadIndex != null) {
 		}
 	}
 
-// resnapshot base on pad change (handled in updatePadGrid pad selection)
-// apply changes when moving
+	// resnapshot base on pad change (handled in updatePadGrid pad selection)
+	// apply changes when moving
 	xy.onChange((pos) => {
-		// Update the stored XY position for the active pad
-		if (state.activePadIndex != null && !isXYMorphing) {
+        // MANUAL OVERRIDE LOGIC
+		if (state.activePadIndex != null) {
+            // 1. Tell Audio Engine we are manually overriding position
+            // This ensures audio reacts immediately to dragging
+            // CRITICAL FIX: Only trigger override if USER is actually dragging.
+            // Programmatic updates (like syncXYToPad) should NOT lock the voice.
+            if (xyUserDragging) {
+                state.voiceManager?.setVoiceManualOverride(state.activePadIndex, true, pos.x, pos.y);
+            }
+            
+            // 2. Update Store (so state persists)
+            if (!isXYMorphing) {
 			state.padParams.setXY(state.activePadIndex, pos);
+            }
 		}
 		
-		// Update motion panel cursor if active
+		// 3. Update Motion Panel Cursor (Visual only)
 		if (motionCtrl) {
 			motionCtrl.setCursor(pos.x, pos.y);
 		}
 
-		// Bilinear weights for 4 corners
-		const wTL = (1 - pos.x) * (1 - pos.y);
-	const wTR = pos.x * (1 - pos.y);
-	const wBL = (1 - pos.x) * pos.y;
-	const wBR = pos.x * pos.y;
-	const mode = getXYMode();
-	if (mode === 'pads') {
-		// Set flag to prevent saving selection to pad during morphing
-		isXYMorphing = true;
-		// Mix between pads' stored parameters (always read from original pad values)
-		const idxOf = (v: string) => Number(v.split(':')[1] ?? '0') || 0;
-		const defs = [
-			{ idx: idxOf(customSelectTL?.getValue() || ''), w: wTL },
-			{ idx: idxOf(customSelectTR?.getValue() || ''), w: wTR },
-			{ idx: idxOf(customSelectBL?.getValue() || ''), w: wBL },
-			{ idx: idxOf(customSelectBR?.getValue() || ''), w: wBR }
-		];
-		// Sum weights for normalization (though weights sum to 1)
-		const sumW = defs.reduce((s, d) => s + d.w, 0) || 1;
-		const norm = defs.map(d => ({ ...d, w: d.w / sumW }));
-		// Interpolate granular and fx from ORIGINAL pad values (never modify pads)
-		const g: any = {};
-		const f: any = {};
-		// seed with zeros
-		const samplePad = state.padParams.get(0);
-		for (const k of Object.keys(samplePad.granular) as Array<keyof GranularParams>) g[k] = 0;
-		for (const k of Object.keys(samplePad.effects) as Array<keyof EffectsParams>) f[k] = 0;
-		for (const d of norm) {
-			// Always read from original pad values, never from modified state
-			const pad = state.padParams.get(d.idx);
-			for (const k of Object.keys(pad.granular) as Array<keyof GranularParams>) {
-				g[k] += (pad.granular[k] as number) * d.w;
-			}
-			for (const k of Object.keys(pad.effects) as Array<keyof EffectsParams>) {
-				f[k] += (pad.effects[k] as number) * d.w;
-			}
-		}
-		// Apply interpolated values to engine/effects/UI (but DO NOT save to pads)
-		state.engine?.setParams(g);
-		state.engine?.setEffectParams(f);
-		// Aggiorna il numero di simboli nell'XYPad se cambia il reverbMix
-		if (f.reverbMix != null) {
-			xy.setReverbMix?.(f.reverbMix);
-		}
-		// Aggiorna il colore ciano se cambia il filtro cutoff (in modalità pads il peso è 0)
-		if (f.filterCutoffHz != null) {
-			xy.setFilterCutoff?.(f.filterCutoffHz, 0);
-		}
-		// Aggiorna l'animazione della griglia se cambia la densità (in modalità pads il peso è 0)
-		if (g.density != null) {
-			xy.setDensity?.(g.density, 0);
-		}
-		controls.setGranularUI(g);
-		controls.setFxUI(f);
-		// Interpolate selection (region) start/end if available
-		if (state.buffer) {
-			let haveAny = false;
-			let start = 0;
-			let end = 0;
-			for (const d of norm) {
-				const r = state.regions.get(d.idx);
-				if (r) {
-					start += r.start * d.w;
-					end += r.end * d.w;
-					haveAny = true;
-				}
-			}
-			if (haveAny) {
-				// clamp within buffer
-				if (start < 0) start = 0;
-				if (end > state.buffer.duration) end = state.buffer.duration;
-				if (end < start) end = start;
-				waveform.setSelection(start, end);
-				updateSelPosUI();
-			}
-		}
-		// Interpolate colors from pad colors
-		const padColors = defs.map(d => PAD_COLORS[d.idx % PAD_COLORS.length]);
-		const colorWeights = norm.map(d => d.w);
-		const interpolatedColor = interpolateColors(padColors, colorWeights);
-		waveform.setColor(interpolatedColor, hexToRgba(interpolatedColor, 0.18));
-		// Reset flag after morphing
-		isXYMorphing = false;
-		// Update UI knobs to reflect interpolated values (not pad values)
-		// Manually update knobs with interpolated values instead of reading from pads
-		knobConfigs.forEach(cfg => {
-			const knobEl = document.querySelector(`.knob[data-knob="${cfg.id}"]`) as HTMLElement | null;
-			const valEl = document.querySelector(`.tile-value[data-val="${cfg.id}"]`) as HTMLElement | null;
-			if (!knobEl || !valEl) return;
-			let value = 0;
-			// Map knob IDs to interpolated values
-			if (cfg.id === 'pitch') value = g.pitchSemitones;
-			else if (cfg.id === 'density') value = g.density;
-			else if (cfg.id === 'grain') value = g.grainSizeMs;
-			else if (cfg.id === 'rand') value = g.randomStartMs;
-			else if (cfg.id === 'filter') value = f.filterCutoffHz;
-			else if (cfg.id === 'res') value = f.filterQ ?? 0;
-			else if (cfg.id === 'dtime') value = f.delayTimeSec;
-			else if (cfg.id === 'dmix') value = f.delayMix;
-			else if (cfg.id === 'reverb') value = f.reverbMix;
-			else if (cfg.id === 'gain') value = f.masterGain;
-			else if (cfg.id === 'selpos') {
-				// Calculate selection position from interpolated selection
-				const sel = waveform.getSelection();
-				if (sel && state.buffer) {
-					const width = sel.end - sel.start;
-					const movable = Math.max(0, state.buffer.duration - width);
-					value = movable > 0 ? (sel.start / movable) : 0;
-				} else {
-					value = 0;
-				}
-			}
-			valEl.textContent = cfg.format(value);
-			updateKnobAngle(knobEl, value, cfg);
-		});
-		return;
-	}
-	// Default: parameters mode - influence toward PARAMS maxima from base snapshot
-	if (xyBaseGranular == null || xyBaseFx == null) snapshotBaseFromCurrentPad();
-	if (!xyBaseGranular || !xyBaseFx) return;
-	const cornerDefs = [
-		{ id: (customSelectTL?.getValue() || '') as ParamId, weight: wTL },
-		{ id: (customSelectTR?.getValue() || '') as ParamId, weight: wTR },
-		{ id: (customSelectBL?.getValue() || '') as ParamId, weight: wBL },
-		{ id: (customSelectBR?.getValue() || '') as ParamId, weight: wBR }
-	];
-	const influenceMap = new Map<ParamId, number>();
-	for (const c of cornerDefs) {
-		influenceMap.set(c.id, (influenceMap.get(c.id) ?? 0) + c.weight);
-	}
-	const granularUpdate: any = {};
-	const fxUpdate: any = {};
-	let selectionUpdateApplied = false;
-	for (const [paramId, infl] of influenceMap.entries()) {
-		const meta = PARAMS.find(p => p.id === paramId)!;
-		const baseVal =
-			meta.kind === 'granular' ? (xyBaseGranular as any)[meta.id] as number :
-			meta.kind === 'fx' ? (xyBaseFx as any)[meta.id] as number :
-			(xyBaseSelectionPos ?? 0);
-		const targetVal = meta.max;
-		const newVal = baseVal + (targetVal - baseVal) * Math.max(0, Math.min(1, infl));
-		if (meta.kind === 'granular') {
-			granularUpdate[meta.id] = newVal;
-		} else if (meta.kind === 'fx') {
-			fxUpdate[meta.id] = newVal;
-		} else if (meta.kind === 'selection' && !selectionUpdateApplied) {
-			const sel = waveform.getSelection();
-			if (sel && state.buffer) {
-				const width = sel.end - sel.start;
-				const movable = Math.max(0, state.buffer.duration - width);
-				let newStart = movable * Math.max(0, Math.min(1, newVal));
-				let newEnd = newStart + width;
-				if (newEnd > state.buffer.duration) { newEnd = state.buffer.duration; newStart = Math.max(0, newEnd - width); }
-				waveform.setSelection(newStart, newEnd);
-				updateSelPosUI();
-				selectionUpdateApplied = true;
-			}
-		}
-	}
-	if (Object.keys(granularUpdate).length) {
-		state.engine?.setParams(granularUpdate);
-		controls.setGranularUI(granularUpdate);
-		if (state.activePadIndex != null) state.padParams.setGranular(state.activePadIndex, granularUpdate);
-		// Aggiorna l'animazione della griglia se cambia la densità
-		if (granularUpdate.density != null) {
-			// Trova il peso del vertice TR per la densità
-			const densityWeight = influenceMap.get('density') ?? 0;
-			xy.setDensity?.(granularUpdate.density, densityWeight);
-		}
-	}
-	if (Object.keys(fxUpdate).length) {
-		applyFxToEngine(fxUpdate);
-		controls.setFxUI(fxUpdate);
-		if (state.activePadIndex != null) state.padParams.setEffects(state.activePadIndex, fxUpdate);
-		// Aggiorna il numero di simboli nell'XYPad se cambia il reverbMix
-		if (fxUpdate.reverbMix != null) {
-			xy.setReverbMix?.(fxUpdate.reverbMix);
-		}
-		// Aggiorna il colore ciano se cambia il filtro cutoff
-		if (fxUpdate.filterCutoffHz != null) {
-			// Trova il peso del vertice TL per il filtro cutoff
-			const cutoffWeight = influenceMap.get('filterCutoffHz') ?? 0;
-			xy.setFilterCutoff?.(fxUpdate.filterCutoffHz, cutoffWeight);
-		}
-	}
-	refreshParamTilesFromState();
-});
+        // 4. Update Param Visuals (Knobs, Colors)
+        updateVisualsFromXY(pos.x, pos.y);
+        
+        // Note: We don't need to manually interpolate params here anymore
+        // because updateVisualsFromXY handles the UI
+        // and VoiceManager internal loop handles the Audio params (via setVoiceManualOverride).
+    });
+
+    // Reset override when drag ends
+    if (xyCanvas) {
+        const resetOverride = () => {
+            if (state.activePadIndex != null) {
+                state.voiceManager?.setVoiceManualOverride(state.activePadIndex, false);
+            }
+            xyUserDragging = false;
+        };
+        xyCanvas.addEventListener('pointerup', resetOverride);
+        xyCanvas.addEventListener('pointerleave', resetOverride);
+        xyCanvas.addEventListener('pointercancel', resetOverride);
+    }
 
 // ---------- Update Manager (Electron only) ----------
 const updateManager = createUpdateManager();
@@ -1825,4 +2136,3 @@ updateManager.onUpdateDownloaded((info) => {
 		}, 10000);
 	}
 });
-

@@ -36,6 +36,9 @@
   --knob-dot-color: #d9d9d9;
   --knob-plus-color: #b0b0b0;
   --tile-value-color: #d0d0d0;
+  --danger: #ff6b6b;
+  --danger-bg: #2f1212;
+  --danger-border: #ff6b6b66;
 }
 
 [data-theme="light"] {
@@ -76,6 +79,9 @@
   --knob-dot-color: #424245;
   --knob-plus-color: #6e6e73;
   --tile-value-color: #1d1d1f;
+  --danger: #c92a2a;
+  --danger-bg: #ffecec;
+  --danger-border: #c92a2a66;
 }
 * { box-sizing: border-box; }
 html, body, #app { height: 100%; }
@@ -389,6 +395,14 @@ h1, h2 { margin: 0 0 8px 0; font-weight: 600; }
   font-size: 13px;
 }
 .btn:hover { background: var(--btn-bg-hover); cursor: pointer; }
+.btn.btn-danger {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border-color: var(--danger-border);
+}
+.btn.btn-danger:hover {
+  background: color-mix(in srgb, var(--danger-bg) 70%, var(--danger) 30%);
+}
 .btn-icon {
   background: var(--btn-bg);
   color: var(--muted);

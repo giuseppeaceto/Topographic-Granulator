@@ -9,6 +9,7 @@ export type XYPad = {
 	setFilterCutoff?: (cutoffHz: number, cornerWeight: number) => void; // Optional method for setting filter cutoff to control color tint (radial from TL corner)
 	setDensity?: (density: number, cornerWeight: number) => void; // Optional method for setting density (1-60) to control grid animation (radial from TR corner)
 	updateTheme?: () => void; // Optional method for updating theme colors
+    setGhostPositions?: (positions: { x: number, y: number, colorIndex: number }[]) => void; // Optional method for multi-cursor visualization
 };
 
 export function createXYPad(canvas: HTMLCanvasElement): XYPad {

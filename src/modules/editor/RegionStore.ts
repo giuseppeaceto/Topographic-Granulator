@@ -15,7 +15,13 @@ export function createRegionStore(size: number) {
 	function add() {
 		pads.push(null);
 	}
-	return { get, set, getAll, add };
+	function remove(index: number) {
+		pads.splice(index, 1);
+	}
+	function size() {
+		return pads.length;
+	}
+	return { get, set, getAll, add, remove, size };
 }
 
 

@@ -7,7 +7,12 @@ export interface MotionPanelConfig {
 	clearBtn: HTMLButtonElement;
 	loopModeSelect: HTMLSelectElement;
 	speedInput: HTMLInputElement;
+    externalClock?: boolean; // If true, internal animation loop is disabled, play button just toggles state
+    color?: string; // Optional color for path and points
 	onPosition: (x: number, y: number) => void;
+	onPathChange?: (path: Point[]) => void;
+	onPlayStateChange?: (isPlaying: boolean) => void;
+    onSpeedChange?: (speed: number) => void;
 }
 
 export interface Point {
@@ -28,6 +33,7 @@ export function createMotionPanel(config: MotionPanelConfig) {
 	let animationFrame: number | null = null;
 	let speed = 1.0;
 	let mode: 'loop' | 'pingpong' | 'oneshot' | 'reverse' = 'loop';
+    let currentColor = config.color || '#4CAF50';
 	
 	// Canvas sizing
 	function resize() {
@@ -59,20 +65,20 @@ export function createMotionPanel(config: MotionPanelConfig) {
 		ctx.stroke();
 
 		if (path.length > 0) {
-			ctx.strokeStyle = '#4CAF50';
+			ctx.strokeStyle = currentColor;
 			ctx.lineWidth = 2;
 			ctx.beginPath();
-			ctx.moveTo(path[0].x * width, (1 - path[0].y) * height); // invert Y for display
+			ctx.moveTo(path[0].x * width, path[0].y * height); 
 			for (let i = 1; i < path.length; i++) {
-				ctx.lineTo(path[i].x * width, (1 - path[i].y) * height);
+				ctx.lineTo(path[i].x * width, path[i].y * height);
 			}
 			ctx.stroke();
 			
 			// Draw start/end points
-			ctx.fillStyle = '#81C784';
+			ctx.fillStyle = currentColor;
 			ctx.beginPath();
 			const startX = path[0].x * width;
-			const startY = (1 - path[0].y) * height;
+			const startY = path[0].y * height;
 			ctx.arc(startX, startY, 4, 0, Math.PI * 2);
 			ctx.fill();
 		}
@@ -93,7 +99,7 @@ export function createMotionPanel(config: MotionPanelConfig) {
 	function addPoint(e: PointerEvent) {
 		const rect = canvas.getBoundingClientRect();
 		const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-		const y = Math.max(0, Math.min(1, 1 - (e.clientY - rect.top) / rect.height)); // 0 at bottom
+		const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height)); // 0 at Top (Screen Coords)
 		
 		path.push({
 			x,
@@ -103,11 +109,7 @@ export function createMotionPanel(config: MotionPanelConfig) {
 		
 		drawPath();
 		// Immediate feedback
-		// Invert Y for output (0 at Top -> 0 output)
-		// Internal Y: 0=Bottom, 1=Top.
-		// Desired output: Top -> 0, Bottom -> 1.
-		// So output = 1 - internalY.
-		onPosition(x, 1 - y);
+		onPosition(x, y);
 		updateCursor(x, y);
 	}
 
@@ -118,6 +120,7 @@ export function createMotionPanel(config: MotionPanelConfig) {
 		recordBtn.classList.remove('active');
 		canvas.releasePointerCapture(e.pointerId);
 		// Optimize path if needed?
+		if (config.onPathChange) config.onPathChange(path);
 	}
 
 	canvas.addEventListener('pointerdown', (e) => {
@@ -140,12 +143,16 @@ export function createMotionPanel(config: MotionPanelConfig) {
 	canvas.addEventListener('pointerleave', stopRecording);
 
 	// Playback
-	function startPlayback() {
+	function startPlayback(offsetMs: number = 0) {
 		if (path.length < 2) return;
 		isPlaying = true;
+		config.onPlayStateChange?.(true);
 		playBtn.textContent = 'Stop';
 		playBtn.classList.add('active');
-		playStartTime = performance.now();
+        
+        if (config.externalClock) return; // Don't start internal loop
+
+		playStartTime = performance.now() - (offsetMs / speed);
 		
 		const totalDuration = path[path.length - 1].time;
 		
@@ -196,8 +203,7 @@ export function createMotionPanel(config: MotionPanelConfig) {
 			const x = prev.x + (next.x - prev.x) * segmentProgress;
 			const y = prev.y + (next.y - prev.y) * segmentProgress;
 			
-			// Invert Y for output
-			onPosition(x, 1 - y);
+			onPosition(x, y);
 			updateCursor(x, y);
 			
 			animationFrame = requestAnimationFrame(animate);
@@ -208,6 +214,7 @@ export function createMotionPanel(config: MotionPanelConfig) {
 
 	function stopPlayback() {
 		isPlaying = false;
+		config.onPlayStateChange?.(false);
 		playBtn.textContent = 'Play';
 		playBtn.classList.remove('active');
 		if (animationFrame) cancelAnimationFrame(animationFrame);
@@ -216,7 +223,7 @@ export function createMotionPanel(config: MotionPanelConfig) {
 	function updateCursor(x: number, y: number) {
 		cursor.style.display = 'block';
 		cursor.style.left = `${x * 100}%`;
-		cursor.style.top = `${(1 - y) * 100}%`; // invert Y for CSS top
+		cursor.style.top = `${y * 100}%`; 
 	}
 
 	// Controls
@@ -238,15 +245,36 @@ export function createMotionPanel(config: MotionPanelConfig) {
 		path = [];
 		drawPath();
 		cursor.style.display = 'none';
+		if (config.onPathChange) config.onPathChange(path);
 	});
 
 	loopModeSelect.addEventListener('change', () => {
 		mode = loopModeSelect.value as any;
+        // Restart playback to apply mode change immediately if playing
+        if (isPlaying) {
+            config.onPlayStateChange?.(true);
+        }
 	});
 
 	speedInput.addEventListener('input', () => {
+		const oldSpeed = speed;
 		speed = parseFloat(speedInput.value);
+		
+		// Adjust playStartTime to keep current elapsed time consistent
+		// elapsed = (now - start) * oldSpeed
+		// elapsed = (now - newStart) * newSpeed
+		// => (now - start) * oldSpeed = (now - newStart) * newSpeed
+		// => newStart = now - (now - start) * (oldSpeed / newSpeed)
+		if (isPlaying) {
+			const now = performance.now();
+			playStartTime = now - (now - playStartTime) * (oldSpeed / speed);
+		}
+		
+        config.onSpeedChange?.(speed);
 	});
+    
+    // Initial speed emit
+    setTimeout(() => config.onSpeedChange?.(speed), 0);
 	
 	// Init
 	resize();
@@ -258,14 +286,33 @@ export function createMotionPanel(config: MotionPanelConfig) {
 		},
 		getPath: () => path,
 		setCursor: (x: number, y: number) => {
-			if (!isPlaying && !isRecording) {
-				// Invert Y for input display (0 input -> Top -> 1 internal)
-				updateCursor(x, 1 - y);
+			if ((!isPlaying && !isRecording) || config.externalClock) {
+				updateCursor(x, y);
 			}
 		},
+        setPlaybackState: (playing: boolean) => {
+            // Force UI update without triggering callbacks
+            if (playing !== isPlaying) {
+                isPlaying = playing;
+                playBtn.textContent = playing ? 'Stop' : 'Play';
+                if (playing) playBtn.classList.add('active');
+                else playBtn.classList.remove('active');
+                // If internal clock, handle loop start/stop? 
+                // For now assuming this is used mainly for external sync
+                if (!config.externalClock) {
+                    if (playing) startPlayback(); else stopPlayback();
+                }
+            }
+        },
         isRecording: () => isRecording,
         isPlaying: () => isPlaying,
-        stop: () => stopPlayback()
+        play: (offsetMs?: number) => startPlayback(offsetMs),
+        stop: () => stopPlayback(),
+        getMode: () => mode,
+        setColor: (color: string) => {
+            currentColor = color;
+            drawPath();
+        }
 	};
 }
 

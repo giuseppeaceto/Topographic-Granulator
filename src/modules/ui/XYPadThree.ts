@@ -110,6 +110,53 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 	knob.scale.set(0.04, 0.04, 0.04); // scale to world units (più grande)
 	knob.position.z = 0.02;
 
+    // Ghost Cursors Group
+    const ghostsGroup = new THREE.Group();
+    scene.add(ghostsGroup);
+    
+    // Pool of ghost meshes
+    const ghostMeshes: THREE.Mesh[] = [];
+    const ghostMaterials: THREE.MeshStandardMaterial[] = [];
+    const PAD_COLORS_HEX = [0xA1E34B, 0x66D9EF, 0xFDBC40, 0xFF7AA2, 0x7C4DFF, 0x00E5A8, 0xF06292, 0xFFD54F];
+
+    function updateGhosts(positions: { x: number, y: number, colorIndex: number }[]) {
+        // Ensure pool size
+        while (ghostMeshes.length < positions.length) {
+            const mat = new THREE.MeshStandardMaterial({
+                color: 0xffffff,
+                transparent: true,
+                opacity: 0.6,
+                metalness: 0.2,
+                roughness: 0.2
+            });
+            const mesh = new THREE.Mesh(knobGeom, mat);
+            mesh.scale.set(0.025, 0.025, 0.025); // Slightly smaller than main knob
+            ghostMeshes.push(mesh);
+            ghostMaterials.push(mat);
+            ghostsGroup.add(mesh);
+        }
+        
+        // Hide unused
+        for (let i = positions.length; i < ghostMeshes.length; i++) {
+            ghostMeshes[i].visible = false;
+        }
+        
+        // Update active
+        for (let i = 0; i < positions.length; i++) {
+            const ghost = ghostMeshes[i];
+            const data = positions[i];
+            ghost.visible = true;
+            ghost.position.x = data.x;
+            ghost.position.y = 1 - data.y; // Invert Y for display
+            ghost.position.z = 0.02;
+            
+            const colorHex = PAD_COLORS_HEX[data.colorIndex % PAD_COLORS_HEX.length];
+            ghostMaterials[i].color.setHex(colorHex);
+            ghostMaterials[i].emissive.setHex(colorHex);
+            ghostMaterials[i].emissiveIntensity = 0.4;
+        }
+    }
+
 	// Symbol particles system - simboli strani vicino ai vertici influenzati
 	const symbolsGroup = new THREE.Group();
 	scene.add(symbolsGroup);
@@ -356,18 +403,17 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 			});
 		}
 		
-		// Rimuovi simboli in eccesso
-		while (activeSymbols.length > topVertices.length) {
-			const removed = activeSymbols.pop()!;
-			symbolsGroup.remove(removed.mesh);
-			removed.mesh.geometry.dispose();
-			(removed.mesh.material as THREE.Material).dispose();
-		}
+		// Hide unused symbols (Object Pooling: Don't destroy, just hide)
+		for (let i = topVertices.length; i < activeSymbols.length; i++) {
+            activeSymbols[i].mesh.visible = false;
+        }
 		
-		// Aggiorna posizioni e proprietà dei simboli
+		// Aggiorna posizioni e proprietà dei simboli attivi
 		for (let i = 0; i < topVertices.length; i++) {
 			const vertex = topVertices[i];
 			const symbol = activeSymbols[i];
+            
+            symbol.mesh.visible = true;
 			
 			// Posiziona il simbolo sopra il vertice
 			symbol.mesh.position.x = vertex.x;
@@ -672,7 +718,12 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 		renderOnce();
 	}
 
-	return { setPosition, getPosition, onChange, setCornerLabels, setSpeed, setReverbMix, setFilterCutoff, setDensity, updateTheme, setPositionSilent };
+    function setGhostPositions(positions: { x: number, y: number, colorIndex: number }[]) {
+        updateGhosts(positions);
+        renderOnce();
+    }
+
+	return { setPosition, getPosition, onChange, setCornerLabels, setSpeed, setReverbMix, setFilterCutoff, setDensity, updateTheme, setPositionSilent, setGhostPositions };
 }
 
 
