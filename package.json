@@ -3,6 +3,10 @@
   "productName": "Undergrain",
   "description": "Topographic Granulator - Desktop Audio Application",
   "version": "0.1.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/GiuseppeAceto/Topographic-Granulator.git"
+  },
   "private": true,
   "main": "electron/main.cjs",
   "type": "module",
@@ -18,16 +22,17 @@
     "electron:build:mac": "npm run build && electron-builder --mac",
     "electron:build:win": "npm run build && electron-builder --win",
     "electron:build:linux": "npm run build && electron-builder --linux",
-    "electron:build:all": "npm run build && electron-builder --mac --win --linux"
+    "electron:build:all": "npm run build && electron-builder --mac --win --linux",
+    "electron:publish": "npm run build && electron-builder -p always"
   },
   "dependencies": {
-    "three": "^0.160.1"
+    "three": "^0.160.1",
+    "electron-updater": "^6.1.7"
   },
   "devDependencies": {
     "@types/three": "^0.181.0",
     "electron": "^39.2.6",
     "electron-builder": "^24.9.1",
-    "electron-updater": "^6.1.7",
     "typescript": "^5.6.3",
     "vite": "^5.4.8",
     "vite-plugin-top-level-await": "^1.6.0",
@@ -74,7 +79,6 @@
           ]
         }
       ],
-      "icon": "build/icon.icns",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
@@ -131,7 +135,7 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "your-github-username",
+      "owner": "GiuseppeAceto",
       "repo": "Topographic-Granulator"
     }
   }

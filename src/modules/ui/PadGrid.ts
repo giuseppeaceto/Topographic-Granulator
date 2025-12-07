@@ -1,5 +1,24 @@
 import type { Region } from '../editor/RegionStore';
 
+export const PAD_ICONS = [
+	// 1. Activity (Pulse)
+	'<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+	// 2. Audio Lines
+	'<path d="M12 3v18"/><path d="M8 9v6"/><path d="M4 11v2"/><path d="M16 9v6"/><path d="M20 11v2"/>',
+	// 3. Layers
+	'<path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>',
+	// 4. Hexagon
+	'<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>',
+	// 5. Wind
+	'<path d="M9.59 4.59A2 2 0 1 1 11 8H2m10.59 11.41A2 2 0 1 0 14 16H2m15.73-8.27A2.5 2.5 0 1 1 19.5 12H2"/>',
+	// 6. Zap
+	'<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
+	// 7. Grid
+	'<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>',
+	// 8. Disc
+	'<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="2"/>'
+];
+
 type PadGridOptions = {
 	colors?: string[];
 	activeIndex?: number | null;
@@ -11,25 +30,6 @@ export function createPadGrid(container: HTMLElement, regions: Array<Region | nu
 	const colors = opts.colors ?? [];
 	const activeIndex = opts.activeIndex ?? null;
 
-	const PAD_ICONS = [
-		// 1. Activity (Pulse)
-		'<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
-		// 2. Audio Lines
-		'<path d="M12 3v18"/><path d="M8 9v6"/><path d="M4 11v2"/><path d="M16 9v6"/><path d="M20 11v2"/>',
-		// 3. Layers
-		'<path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>',
-		// 4. Hexagon
-		'<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>',
-		// 5. Wind
-		'<path d="M9.59 4.59A2 2 0 1 1 11 8H2m10.59 11.41A2 2 0 1 0 14 16H2m15.73-8.27A2.5 2.5 0 1 1 19.5 12H2"/>',
-		// 6. Zap
-		'<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
-		// 7. Grid
-		'<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>',
-		// 8. Disc
-		'<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="2"/>'
-	];
-
 	const callbacks: {
 		onPadPress?: (index: number) => void;
 		onPadLongPress?: (index: number) => void;
@@ -40,18 +40,25 @@ export function createPadGrid(container: HTMLElement, regions: Array<Region | nu
 		for (let i = 0; i < regions.length; i++) {
 			const pad = document.createElement('div');
 			pad.className = 'pad' + (regions[i] ? ' assigned' : '') + (i === activeIndex ? ' active' : '');
-			const color = colors[i % colors.length] || '';
+			
+			// Determine icon and color index
+			// If region has explicit iconIndex, use that. Otherwise use pad index.
+			const visualIndex = regions[i]?.iconIndex !== undefined ? regions[i]!.iconIndex! : i;
+			
+			const color = colors[visualIndex % colors.length] || '';
+			const iconContent = PAD_ICONS[visualIndex % PAD_ICONS.length];
+
 			if (color) {
 				pad.style.borderColor = color;
 				pad.style.color = regions[i] ? color : pad.style.color;
 				pad.style.boxShadow = i === activeIndex ? `0 0 0 2px ${color}66 inset` : '';
 			}
+			
+			pad.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.6">${iconContent}</svg>`;
 			if (regions[i]?.name) {
-				pad.textContent = regions[i]!.name;
-			} else {
-				const iconContent = PAD_ICONS[i % PAD_ICONS.length];
-				pad.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.6">${iconContent}</svg>`;
+				pad.title = regions[i]!.name!;
 			}
+
 			pad.dataset.index = String(i);
 			wire(pad, i);
 			pads.push(pad);
@@ -102,5 +109,3 @@ export function createPadGrid(container: HTMLElement, regions: Array<Region | nu
 	render();
 	return Object.assign(callbacks, { pads });
 }
-
-

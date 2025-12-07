@@ -347,8 +347,8 @@ h1, h2 { margin: 0 0 8px 0; font-weight: 600; }
   justify-content: space-between;
   padding: 0 16px;
   gap: 16px;
-  z-index: 200;
   box-shadow: 0 -2px 10px var(--toolbar-shadow);
+  z-index: 200;
 }
 .toolbar-section {
   display: flex;
@@ -926,3 +926,84 @@ hr { border: none; border-top: 1px solid var(--hr-color); margin: 14px 0; }
   }
 }
 
+/* Modal Styles */
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+.modal.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+.modal-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(2px);
+}
+.modal-content {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  width: 320px;
+  max-width: 90vw;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+.modal-content h3 {
+  margin-top: 0;
+  margin-bottom: 16px;
+  font-size: 16px;
+  color: var(--fg);
+}
+.icon-grid {
+  max-height: 200px;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.icon-option {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 48px;
+  width: 100%;
+  aspect-ratio: 1;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--muted);
+  transition: all 0.2s;
+}
+.icon-option svg {
+  width: 24px;
+  height: 24px;
+}
+.icon-option:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.icon-option.selected {
+  background: var(--btn-bg-hover);
+  color: var(--text);
+  border-color: var(--accent);
+}
+.form-group label {
+  font-size: 12px;
+  color: var(--muted);
+}

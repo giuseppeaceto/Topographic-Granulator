@@ -1,4 +1,4 @@
-export type Region = { start: number; end: number; name?: string };
+export type Region = { start: number; end: number; name?: string; iconIndex?: number };
 
 export function createRegionStore(size: number) {
 	const pads: Array<Region | null> = new Array(size).fill(null);

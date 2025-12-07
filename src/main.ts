@@ -4,7 +4,7 @@ import { loadAudioFile } from './modules/audio/AudioFileLoader';
 import { createRegionStore, type Region } from './modules/editor/RegionStore';
 import { createEffectsChain, type EffectsChain } from './modules/effects/EffectsChain';
 import { createGranularWorkletEngine, type GranularWorkletEngine } from './modules/granular/GranularWorkletEngine';
-import { createPadGrid } from './modules/ui/PadGrid';
+import { createPadGrid, PAD_ICONS } from './modules/ui/PadGrid';
 import { setupControls } from './modules/ui/Controls';
 import { createWaveformView } from './modules/ui/WaveformView';
 import { createXYPadThree } from './modules/ui/XYPadThree';
@@ -139,6 +139,121 @@ themeObserver.observe(document.documentElement, {
 	attributeFilter: ['data-theme']
 });
 
+// Pad Edit Modal Logic
+const padEditModal = document.getElementById('padEditModal') as HTMLDivElement;
+const padIconGrid = document.getElementById('padIconGrid') as HTMLDivElement;
+const padEditCancel = document.getElementById('padEditCancel') as HTMLButtonElement;
+const padEditSave = document.getElementById('padEditSave') as HTMLButtonElement;
+
+let currentEditIndex: number | null = null;
+let pendingRegionUpdate: { start: number, end: number } | null = null;
+let selectedIconIndex: number | null = null;
+
+function openPadEditModal(index: number, pendingRegion: { start: number, end: number } | null) {
+	currentEditIndex = index;
+	pendingRegionUpdate = pendingRegion;
+	const region = state.regions.get(index);
+	selectedIconIndex = region?.iconIndex ?? null;
+	
+	padIconGrid.innerHTML = '';
+	PAD_ICONS.forEach((icon, i) => {
+		const div = document.createElement('div');
+		div.className = 'icon-option';
+		
+		// Map icon index to color
+		const color = PAD_COLORS[i % PAD_COLORS.length];
+		div.style.color = color;
+		div.style.borderColor = 'var(--border-subtle)';
+
+		// If explicit icon set, match it.
+		// If no explicit icon set, default behavior is to use index.
+		// When opening modal, we want to show what IS currently used.
+		// If region.iconIndex is set, use that.
+		// If not, the pad is using `index % PAD_ICONS.length`.
+		// Let's pre-select that if we are editing an existing assignment without custom icon.
+		const effectiveIndex = region?.iconIndex !== undefined ? region.iconIndex : (region ? index % PAD_ICONS.length : null);
+		const isSelected = selectedIconIndex !== null ? (selectedIconIndex === i) : (effectiveIndex === i);
+		
+		if (isSelected) {
+			div.classList.add('selected');
+			div.style.borderColor = color;
+			div.style.backgroundColor = hexToRgba(color, 0.1);
+			selectedIconIndex = i; // Ensure we have a selection to save if user hits save immediately
+		}
+        
+		div.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${icon}</svg>`;
+		div.onclick = () => {
+			document.querySelectorAll('.icon-option').forEach(el => {
+				el.classList.remove('selected');
+				(el as HTMLElement).style.borderColor = 'var(--border-subtle)';
+				(el as HTMLElement).style.backgroundColor = '';
+			});
+			div.classList.add('selected');
+			div.style.borderColor = color;
+			div.style.backgroundColor = hexToRgba(color, 0.1);
+			selectedIconIndex = i;
+		};
+		padIconGrid.appendChild(div);
+	});
+
+	padEditModal.classList.add('open');
+    padEditModal.style.display = 'flex';
+    padEditModal.setAttribute('aria-hidden', 'false');
+}
+
+function closePadEditModal() {
+	padEditModal.classList.remove('open');
+    setTimeout(() => {
+        padEditModal.style.display = 'none';
+        padEditModal.setAttribute('aria-hidden', 'true');
+    }, 200);
+	currentEditIndex = null;
+    pendingRegionUpdate = null;
+}
+
+if (padEditCancel) padEditCancel.addEventListener('click', closePadEditModal);
+
+if (padEditSave) padEditSave.addEventListener('click', () => {
+	if (currentEditIndex === null) return;
+    
+    const existingRegion = state.regions.get(currentEditIndex);
+    let region: Region;
+    
+    // We only care about start/end and iconIndex now. Name is preserved if existing but not editable.
+    const iconIndex = selectedIconIndex !== null ? selectedIconIndex : undefined;
+
+    if (pendingRegionUpdate) {
+        region = { 
+            start: pendingRegionUpdate.start, 
+            end: pendingRegionUpdate.end, 
+            name: existingRegion?.name, 
+            iconIndex 
+        };
+    } else if (existingRegion) {
+        region = { ...existingRegion, iconIndex };
+    } else {
+        closePadEditModal();
+        return;
+    }
+    
+	state.regions.set(currentEditIndex, region);
+    
+    // Explicitly update waveform color if this is the active pad
+    if (state.activePadIndex === currentEditIndex) {
+        // If we updated the active pad, ensure waveform color matches new icon
+        // Use the explicitly saved iconIndex if present, otherwise fallback to pad index
+        const effectiveIconIndex = region.iconIndex !== undefined ? region.iconIndex : currentEditIndex;
+        const color = PAD_COLORS[effectiveIconIndex % PAD_COLORS.length];
+        waveform.setColor(color, hexToRgba(color, 0.18));
+        waveform.setSelection(region.start, region.end);
+    }
+
+    // Force update of pad grid immediately
+    updatePadGrid();
+    
+    closePadEditModal();
+});
+
 // Initialize Floating Panel Manager
 const panelManager = createFloatingPanelManager();
 
@@ -244,7 +359,12 @@ waveform.onSelection((sel) => {
 		// BUT NOT during XY pad morphing (would interfere with morphing)
 		if (state.activePadIndex != null && !isXYMorphing) {
 			const existing = state.regions.get(state.activePadIndex);
-			state.regions.set(state.activePadIndex, { start: sel.start, end: sel.end, name: existing?.name });
+			state.regions.set(state.activePadIndex, { 
+                start: sel.start, 
+                end: sel.end, 
+                name: existing?.name,
+                iconIndex: existing?.iconIndex 
+            });
 			updatePadGrid();
 		}
 		// Update engine region in real-time
@@ -719,7 +839,9 @@ function updatePadGrid() {
 		if (state.recallPerPad) {
 			recallPadParams(index, 300, prevIndex);
 			// Colorize waveform selection based on pad (visual only, selection moves in recallPadParams)
-			const c = PAD_COLORS[index % PAD_COLORS.length];
+			const region = state.regions.get(index);
+			const effectiveIndex = region?.iconIndex !== undefined ? region.iconIndex : index;
+			const c = PAD_COLORS[effectiveIndex % PAD_COLORS.length];
 			waveform.setColor(c, hexToRgba(c, 0.18));
 			
 			// Ensure engine is running
@@ -728,12 +850,13 @@ function updatePadGrid() {
 			}
 		} else {
 			// Instant recall behavior
-			const c = PAD_COLORS[index % PAD_COLORS.length];
+			const region = state.regions.get(index);
+			const effectiveIndex = region?.iconIndex !== undefined ? region.iconIndex : index;
+			const c = PAD_COLORS[effectiveIndex % PAD_COLORS.length];
 			waveform.setColor(c, hexToRgba(c, 0.18));
 			recallWaveformSelection(index);
 			updateSelPosUI();
 			
-			const region = state.regions.get(index);
 			if (region && state.buffer) triggerRegion(region);
 		}
 	};
@@ -748,7 +871,9 @@ function updatePadGrid() {
 		snapshotBaseFromCurrentPad();
 		
 		// colorize waveform for this pad
-		const c = PAD_COLORS[index % PAD_COLORS.length];
+		const region = state.regions.get(index);
+		const effectiveIndex = region?.iconIndex !== undefined ? region.iconIndex : index;
+		const c = PAD_COLORS[effectiveIndex % PAD_COLORS.length];
 		waveform.setColor(c, hexToRgba(c, 0.18));
 		
 		if (state.recallPerPad) {
@@ -766,26 +891,18 @@ function updatePadGrid() {
 		if (!state.buffer) return;
 		const sel = waveform.getSelection();
 		if (sel) {
-			// Only show prompt if we're not just switching/recalling
-			// Actually long press is usually for assigning.
-			// If we just interpolated to it, we might be at the target region already or moving there.
-			// But assignment takes CURRENT selection.
-			// If we are moving, taking current selection is weird.
-			// Standard behavior: long press assigns CURRENT selection to pad.
-			const name = prompt('Name (optional):', state.regions.get(index)?.name ?? '') ?? '';
-			const region = { start: sel.start, end: sel.end, name: name || undefined };
-			state.regions.set(index, region);
-			// ensure waveform reflects what we just assigned (stops interpolation if any?)
-			// If we just assigned it, we want it to stay there.
-			waveform.setSelection(region.start, region.end);
+			openPadEditModal(index, { start: sel.start, end: sel.end });
+		} else if (state.regions.get(index)) {
+			// Edit existing pad without changing region
+			openPadEditModal(index, null);
 		}
 		updatePadGrid();
 		// Update XY pad dropdowns if in pad mode
 		if (getXYMode() === 'pads') {
-			populateParamSelect(cornerTL);
-			populateParamSelect(cornerTR);
-			populateParamSelect(cornerBL);
-			populateParamSelect(cornerBR);
+			populateParamSelect(customSelectTL);
+			populateParamSelect(customSelectTR);
+			populateParamSelect(customSelectBL);
+			populateParamSelect(customSelectBR);
 			refreshXYCornerLabels();
 		}
 	};

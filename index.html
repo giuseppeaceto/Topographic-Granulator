@@ -256,6 +256,25 @@
         </div>
       </footer>
     </div>
+
+    <!-- Pad Edit Modal -->
+    <div id="padEditModal" class="modal" aria-hidden="true" style="display: none;">
+      <div class="modal-overlay"></div>
+      <div class="modal-content">
+        <h3>Edit Pad</h3>
+        <div class="form-group">
+          <label style="display: block; margin-bottom: 8px;">Select Icon</label>
+          <div id="padIconGrid" class="icon-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;">
+            <!-- Icons injected via JS -->
+          </div>
+        </div>
+        <div class="modal-actions" style="margin-top: 16px; display: flex; justify-content: flex-end; gap: 8px;">
+          <button id="padEditCancel" class="btn">Cancel</button>
+          <button id="padEditSave" class="btn primary">Save</button>
+        </div>
+      </div>
+    </div>
+
     <script type="module" src="./src/main.ts"></script>
   </body>
   </html>
