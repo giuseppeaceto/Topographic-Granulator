@@ -11,17 +11,20 @@
   <body>
     <div id="app">
       <div class="window-drag-bar"></div>
-      <!-- XY Pad - Large and centered -->
-      <main class="xy-pad-container">
-        <div class="xy-pad-wrapper">
-          <div class="xy-header">
+      <div class="app-layout">
+        <!-- XY Pad - Left side -->
+        <main class="xy-pad-container">
+          <!-- Floating Header -->
+          <div class="xy-floating-header">
             <div class="app-header-section">
               <img id="appLogo" src="./images/logo.png" alt="Logo" class="logo-icon" />
               <div class="app-header-text">
                 <h2 class="app-logo">
                   <span class="logo-text">Undergrain</span>
+                  <span class="beta-badge">BETA</span>
                 </h2>
                 <p class="app-subtitle">topographic granulator</p>
+                <p class="app-version">v0.1.0</p>
               </div>
             </div>
             <div class="xy-controls-top">
@@ -36,225 +39,304 @@
                   </button>
                 </label>
               </div>
-              <span class="xy-hint">Arrow keys ← ↑ → ↓ to move</span>
-            </div>
-            <div class="xy-assign">
-              <div class="xy-assign-row">
-                <label>
-                  <div id="xyCornerTL" aria-label="Top left corner"></div>
-                </label>
-                <label>
-                  <div id="xyCornerTR" aria-label="Top right corner"></div>
-                </label>
-              </div>
-              <canvas id="xyPad" width="800" height="800"></canvas>
-              <div class="xy-assign-row">
-                <label>
-                  <div id="xyCornerBL" aria-label="Bottom left corner"></div>
-                </label>
-                <label>
-                  <div id="xyCornerBR" aria-label="Bottom right corner"></div>
-                </label>
-              </div>
-            </div>
-          </div>
-        </div>
-      </main>
-
-      <!-- Floating Panel: Waveform & Pads -->
-      <div id="panel-waveform" class="floating-panel" data-panel-id="waveform">
-        <div class="panel-header">
-          <h2>Waveform & Pads</h2>
-        </div>
-        <div class="panel-content">
-          <div class="waveform-wrap">
-            <canvas id="waveform" width="1200" height="160"></canvas>
-            <div class="waveform-meta">
-              <span>Selection: <span id="selStart">0.00</span>s – <span id="selEnd">0.00</span>s</span>
-              <span id="bufferDur" style="opacity:.8"></span>
-              <button id="clearSelectionBtn" class="btn-icon" title="Clear selection">✕</button>
-            </div>
-          </div>
-          <div id="padGrid" class="pad-grid"></div>
-          <div class="control-group" style="margin-top:12px;">
-            <span class="control-label">Move selection</span>
-            <div class="nudge-controls">
-              <button id="nudgeLeft" class="btn-icon" title="Move left">◀</button>
-              <button id="nudgeRight" class="btn-icon" title="Move right">▶</button>
-              <span class="nudge-step">
-                Step: <input id="nudgeStepMs" type="number" min="1" max="1000" value="20" class="nudge-input" /> ms
+              <span class="xy-hint">
+                <span class="hint-text">Arrow keys</span>
+                <span class="hint-arrows">
+                  <span class="arrow-key">←</span>
+                  <span class="arrow-key">↑</span>
+                  <span class="arrow-key">→</span>
+                  <span class="arrow-key">↓</span>
+                </span>
+                <span class="hint-text">to move</span>
               </span>
             </div>
           </div>
-          <div class="control-group">
-             <span class="control-label">Zoom Transients</span>
-             <input id="waveZoom" type="range" min="0.1" max="5" step="0.1" value="1" style="width: 100px;" />
+          <div class="xy-pad-wrapper">
+            <div class="xy-header">
+              <div class="xy-assign">
+                <div class="xy-pad-canvas-container">
+                  <canvas id="xyPad" width="800" height="800"></canvas>
+                  <div id="xyCornerTL" class="xy-corner-selector xy-corner-tl" aria-label="Top left corner"></div>
+                  <div id="xyCornerTR" class="xy-corner-selector xy-corner-tr" aria-label="Top right corner"></div>
+                  <div id="xyCornerBL" class="xy-corner-selector xy-corner-bl" aria-label="Bottom left corner"></div>
+                  <div id="xyCornerBR" class="xy-corner-selector xy-corner-br" aria-label="Bottom right corner"></div>
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
+        </main>
 
-      <!-- Floating Panel: Parameters -->
-      <div id="panel-parameters" class="floating-panel" data-panel-id="parameters">
-        <div class="panel-header">
-          <h2>Parameters</h2>
-        </div>
-        <div class="panel-content">
-          <div class="midi-toolbar">
-            <label class="toggle-switch">
-              <input type="checkbox" id="midiLearn" />
-              <span class="toggle-slider"></span>
-              <span class="toggle-label">MIDI Learn</span>
-            </label>
-            <button id="midiClear" class="btn-icon" title="Remove all MIDI assignments">✕</button>
-          </div>
-          <div class="param-grid">
-            <div class="param-tile" data-tile="pitch">
-              <div class="tile-header">PITCH</div>
-              <div class="knob" data-knob="pitch"><span class="knob-dot"></span><span class="knob-plus">+</span></div>
-              <div class="tile-value" data-val="pitch">0</div>
-            </div>
-            <div class="param-tile" data-tile="density">
-              <div class="tile-header">DENSITY</div>
-              <div class="knob" data-knob="density"><span class="knob-dot"></span><span class="knob-plus">+</span></div>
-              <div class="tile-value" data-val="density">15</div>
-            </div>
-            <div class="param-tile" data-tile="grain">
-              <div class="tile-header">GRAIN</div>
-              <div class="knob" data-knob="grain"><span class="knob-dot"></span><span class="knob-plus">+</span></div>
-              <div class="tile-value" data-val="grain">80</div>
-            </div>
-            <div class="param-tile" data-tile="rand">
-              <div class="tile-header">RAND</div>
-              <div class="knob" data-knob="rand"><span class="knob-dot"></span><span class="knob-plus">+</span></div>
-              <div class="tile-value" data-val="rand">40</div>
-            </div>
-            <div class="param-tile" data-tile="selpos">
-              <div class="tile-header">POS</div>
-              <div class="knob" data-knob="selpos"><span class="knob-dot"></span><span class="knob-plus">+</span></div>
-              <div class="tile-value" data-val="selpos">0</div>
+        <!-- Sidebar - Right side with dense grid, no empty spaces -->
+        <aside class="app-sidebar">
+          <!-- Waveform - spans full width -->
+          <div class="grid-item grid-item-waveform">
+            <div class="waveform-wrap">
+              <canvas id="waveform" width="1200" height="160"></canvas>
+              <div class="waveform-meta">
+                <span>Selection: <span id="selStart">0.00</span>s – <span id="selEnd">0.00</span>s</span>
+                <span id="bufferDur" style="opacity:.8"></span>
+              </div>
             </div>
           </div>
-          <div class="control-group">
-            <label class="toggle-switch">
-              <input id="recallPerPad" type="checkbox" checked />
-              <span class="toggle-slider"></span>
-              <span class="toggle-label">Store and recall controls per pad</span>
-            </label>
-          </div>
-        </div>
-      </div>
 
-      <!-- Floating Panel: Effects -->
-      <div id="panel-effects" class="floating-panel" data-panel-id="effects">
-        <div class="panel-header">
-          <h2>Effects</h2>
-        </div>
-        <div class="panel-content">
-          <div class="param-grid">
-            <div class="param-tile" data-tile="filter">
-              <div class="tile-header">FILTER</div>
-              <div class="knob" data-knob="filter"><span class="knob-dot"></span><span class="knob-plus">+</span></div>
-              <div class="tile-value" data-val="filter">4000</div>
-            </div>
-            <div class="param-tile" data-tile="res">
-              <div class="tile-header">RES</div>
-              <div class="knob" data-knob="res"><span class="knob-dot"></span><span class="knob-plus">+</span></div>
-              <div class="tile-value" data-val="res">0</div>
-            </div>
-            <div class="param-tile" data-tile="dtime">
-              <div class="tile-header">DLY-T</div>
-              <div class="knob" data-knob="dtime"><span class="knob-dot"></span><span class="knob-plus">+</span></div>
-              <div class="tile-value" data-val="dtime">0.25</div>
-            </div>
-            <div class="param-tile" data-tile="dmix">
-              <div class="tile-header">DLY-M</div>
-              <div class="knob" data-knob="dmix"><span class="knob-dot"></span><span class="knob-plus">+</span></div>
-              <div class="tile-value" data-val="dmix">0.15</div>
-            </div>
-            <div class="param-tile" data-tile="reverb">
-              <div class="tile-header">REVERB</div>
-              <div class="knob" data-knob="reverb"><span class="knob-dot"></span><span class="knob-plus">+</span></div>
-              <div class="tile-value" data-val="reverb">0.2</div>
-            </div>
-            <div class="param-tile" data-tile="gain">
-              <div class="tile-header">GAIN</div>
-              <div class="knob" data-knob="gain"><span class="knob-dot"></span><span class="knob-plus">+</span></div>
-              <div class="tile-value" data-val="gain">0.9</div>
+          <!-- Granular Parameters -->
+          <div class="grid-item grid-item-params">
+            <div class="param-grid">
+              <div class="param-tile" data-tile="pitch">
+                <div class="tile-header">PITCH</div>
+                <div class="knob" data-knob="pitch" data-tooltip="Pitch shift in semitones (-12 to +12)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                <div class="tile-value" data-val="pitch">0</div>
+              </div>
+              <div class="param-tile" data-tile="density">
+                <div class="tile-header">DENSITY</div>
+                <div class="knob" data-knob="density" data-tooltip="Grain density - number of grains per second (1-60)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                <div class="tile-value" data-val="density">15</div>
+              </div>
+              <div class="param-tile" data-tile="grain">
+                <div class="tile-header">GRAIN</div>
+                <div class="knob" data-knob="grain" data-tooltip="Grain size in milliseconds (10-200ms)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                <div class="tile-value" data-val="grain">80</div>
+              </div>
+              <div class="param-tile" data-tile="rand">
+                <div class="tile-header">RAND</div>
+                <div class="knob" data-knob="rand" data-tooltip="Random start offset in milliseconds (0-200ms)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                <div class="tile-value" data-val="rand">40</div>
+              </div>
+              <div class="param-tile" data-tile="selpos">
+                <div class="tile-header">POS</div>
+                <div class="knob" data-knob="selpos" data-tooltip="Selection position in buffer (0-100%)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                <div class="tile-value" data-val="selpos">0</div>
+              </div>
             </div>
           </div>
-          <h2>XY Pad Speed</h2>
-          <div class="param-grid">
-            <div class="param-tile" data-tile="xyspeed">
-              <div class="tile-header">SPEED</div>
-              <div class="knob" data-knob="xyspeed"><span class="knob-dot"></span><span class="knob-plus">+</span></div>
-              <div class="tile-value" data-val="xyspeed">0.15</div>
-            </div>
-            <div class="param-tile" data-tile="xyshift">
-              <div class="tile-header">SHIFT</div>
-              <div class="knob" data-knob="xyshift"><span class="knob-dot"></span><span class="knob-plus">+</span></div>
-              <div class="tile-value" data-val="xyshift">0.05</div>
-            </div>
-          </div>
-        </div>
-      </div>
 
-      <!-- Floating Panel: Motion Path -->
-      <div id="panel-motion" class="floating-panel" data-panel-id="motion">
-        <div class="panel-header">
-          <h2>Motion Path</h2>
-        </div>
-        <div class="panel-content">
-          <div class="motion-canvas-wrap" style="position: relative; width: 100%; aspect-ratio: 1; border: 1px solid var(--border-color); margin-bottom: 10px; background: #111;">
-            <canvas id="motionCanvas" width="300" height="300" style="width: 100%; height: 100%; display: block; cursor: crosshair;"></canvas>
-            <div id="motionCursor" style="position: absolute; width: 8px; height: 8px; border-radius: 50%; background: #4CAF50; transform: translate(-50%, -50%); top: 50%; left: 50%; pointer-events: none; display: none; box-shadow: 0 0 4px #4CAF50;"></div>
+          <!-- Effects Parameters -->
+          <div class="grid-item grid-item-effects">
+            <div class="param-grid">
+              <div class="param-tile" data-tile="filter">
+                <div class="tile-header">FILTER</div>
+                <div class="knob" data-knob="filter" data-tooltip="Filter cutoff frequency in Hz (200-12000Hz)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                <div class="tile-value" data-val="filter">4000</div>
+              </div>
+              <div class="param-tile" data-tile="res">
+                <div class="tile-header">RES</div>
+                <div class="knob" data-knob="res" data-tooltip="Filter resonance/Q factor (0-20)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                <div class="tile-value" data-val="res">0</div>
+              </div>
+              <div class="param-tile" data-tile="dtime">
+                <div class="tile-header">DLY-T</div>
+                <div class="knob" data-knob="dtime" data-tooltip="Delay time in seconds (0-1.2s)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                <div class="tile-value" data-val="dtime">0.25</div>
+              </div>
+              <div class="param-tile" data-tile="dmix">
+                <div class="tile-header">DLY-M</div>
+                <div class="knob" data-knob="dmix" data-tooltip="Delay mix amount (0-1)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                <div class="tile-value" data-val="dmix">0.15</div>
+              </div>
+              <div class="param-tile" data-tile="reverb">
+                <div class="tile-header">REVERB</div>
+                <div class="knob" data-knob="reverb" data-tooltip="Reverb mix amount (0-1)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                <div class="tile-value" data-val="reverb">0.2</div>
+              </div>
+              <div class="param-tile" data-tile="gain">
+                <div class="tile-header">GAIN</div>
+                <div class="knob" data-knob="gain" data-tooltip="Master gain/output volume (0-1.5)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                <div class="tile-value" data-val="gain">0.9</div>
+              </div>
+            </div>
           </div>
-          <div class="control-group" style="display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; align-items: center;">
-             <button id="motionRecordBtn" class="btn" style="padding: 4px 8px; font-size: 12px; min-width: auto;" title="Draw Path">Draw</button>
-             <button id="motionPlayBtn" class="btn" style="padding: 4px 8px; font-size: 12px; min-width: auto;" title="Play/Pause">Play</button>
-             <button id="motionClearBtn" class="btn" style="padding: 4px 8px; font-size: 12px; min-width: auto;" title="Clear Path">Clear</button>
-          </div>
-           <div class="control-group" style="display: flex; gap: 8px; flex-wrap: wrap; justify-content: space-between; margin-top: 12px; align-items: center;">
-             <select id="motionLoopMode" class="select" style="padding: 2px 4px; font-size: 12px; width: auto;">
-               <option value="loop">Loop</option>
-               <option value="pingpong">Ping Pong</option>
-               <option value="oneshot">One Shot</option>
-               <option value="reverse">Reverse</option>
-             </select>
-             <div style="display: flex; align-items: center; gap: 6px;">
-               <span style="font-size: 11px; opacity: 0.7;">Speed</span>
-               <input id="motionSpeed" type="range" min="0.1" max="4" step="0.1" value="1" style="width: 80px;">
-             </div>
-          </div>
-        </div>
-      </div>
 
-      <!-- Toolbar - Fixed at bottom -->
-      <footer class="app-toolbar">
-        <div class="toolbar-section">
-          <div class="file-loader">
-            <input id="fileInput" type="file" accept="audio/*" class="visually-hidden" />
-            <label for="fileInput" class="btn">Choose file</label>
-            <button id="unlockBtn" class="btn" title="Unlock AudioContext">Unlock audio</button>
-            <span id="fileName" class="filename" aria-live="polite"></span>
+          <!-- Pad Grid -->
+          <div class="grid-item grid-item-pads">
+            <div id="padGrid" class="pad-grid"></div>
           </div>
-        </div>
-        <div class="toolbar-section">
-          <div class="recorder-controls">
-            <button id="recordBtn" class="btn" title="Start audio recording">● Record Audio</button>
-            <button id="recordVideoBtn" class="btn" title="Start video + audio recording">● Record Video</button>
-            <button id="stopRecordBtn" class="btn" disabled title="Stop recording">■ Stop</button>
-            <span id="recordStatus" class="filename" aria-live="polite"></span>
+
+          <!-- Motion Canvas -->
+          <div class="grid-item grid-item-motion">
+            <div class="motion-canvas-wrap">
+              <canvas id="motionCanvas" width="300" height="300"></canvas>
+              <div id="motionCursor"></div>
+            </div>
           </div>
-        </div>
-        <div class="toolbar-section">
-          <button id="themeToggle" class="btn-icon" title="Toggle theme (dark/light)" aria-label="Toggle theme">
-            <span id="themeIcon">☀</span>
-          </button>
-        </div>
-        <div class="toolbar-section toolbar-hint">
-          <small>Load an audio file, select a region and assign it to a pad (long click).</small>
-        </div>
-      </footer>
+
+          <!-- XY Pad Speed -->
+          <div class="grid-item grid-item-xyspeed">
+            <div class="param-grid">
+              <div class="param-tile" data-tile="xyspeed">
+                <div class="tile-header">RATE</div>
+                <div class="knob" data-knob="xyspeed" data-tooltip="XY pad cursor movement rate (0.01-2.0)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                <div class="tile-value" data-val="xyspeed">0.15</div>
+              </div>
+              <div class="param-tile" data-tile="xyshift">
+                <div class="tile-header">SHIFT</div>
+                <div class="knob" data-knob="xyshift" data-tooltip="XY pad cursor shift amount (0.01-1.0)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                <div class="tile-value" data-val="xyshift">0.05</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Motion Controls -->
+          <div class="grid-item grid-item-motion-controls">
+            <div class="param-grid">
+              <div class="param-tile" data-tile="motion-play">
+                <div class="tile-header">PLAY</div>
+                <button id="motionPlayBtn" class="knob" title="Play/Pause" style="cursor: pointer;"><div class="knob-fill" style="height: 0%;"></div><span class="knob-plus">+</span></button>
+                <div class="tile-value">0</div>
+              </div>
+              <div class="param-tile" data-tile="motion-clear">
+                <div class="tile-header">CLEAR</div>
+                <button id="motionClearBtn" class="knob" title="Clear Path" style="cursor: pointer;"><div class="knob-fill" style="height: 0%;"></div><span class="knob-plus">+</span></button>
+                <div class="tile-value">0</div>
+              </div>
+              <div class="param-tile" data-tile="motion-loop">
+                <div class="tile-header">LOOP</div>
+                <div class="option-selector" data-selector="motion-loop" data-tooltip="Motion path loop mode: Loop, PingPong, OneShot, Reverse">
+                  <button class="option-selector-btn" data-direction="prev" aria-label="Previous option">‹</button>
+                  <span class="option-selector-label" data-label="motion-loop">Loop</span>
+                  <button class="option-selector-btn" data-direction="next" aria-label="Next option">›</button>
+                </div>
+                <div class="tile-value" data-val="motion-loop" style="display: none;">Loop</div>
+              </div>
+              <div class="param-tile" data-tile="motion-speed">
+                <div class="tile-header">SPEED</div>
+                <div class="knob" data-knob="motion-speed" data-tooltip="Motion path playback speed (0.1-4.0x)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                <div class="tile-value" data-val="motion-speed">1.0</div>
+              </div>
+            </div>
+            <!-- Hidden inputs for JavaScript logic -->
+            <select id="motionLoopMode" style="display: none;">
+              <option value="loop">Loop</option>
+              <option value="pingpong">Ping Pong</option>
+              <option value="oneshot">One Shot</option>
+              <option value="reverse">Reverse</option>
+            </select>
+            <input id="motionSpeed" type="range" min="0.1" max="4" step="0.1" value="1" style="display: none;" />
+          </div>
+
+          <!-- MIDI Learn Controls -->
+          <div class="grid-item grid-item-midi">
+            <div class="param-grid">
+              <div class="param-tile" data-tile="midi-learn">
+                <div class="tile-header">MIDI</div>
+                <div class="knob toggle-switch-knob" data-knob="midi-learn" data-tooltip="Enable MIDI learn mode - click a control then send MIDI to assign"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                <div class="tile-value" data-val="midi-learn">OFF</div>
+              </div>
+              <div class="param-tile" data-tile="midi-clear">
+                <div class="tile-header">CLEAR</div>
+                <button id="midiClear" class="knob" title="Remove all MIDI assignments" style="cursor: pointer;"><div class="knob-fill" style="height: 0%;"></div><span class="knob-plus">+</span></button>
+                <div class="tile-value">0</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Nudge Controls -->
+          <div class="grid-item grid-item-nudge">
+            <div class="param-grid">
+              <div class="param-tile" data-tile="nudge-left">
+                <div class="tile-header">◀</div>
+                <button id="nudgeLeft" class="knob" title="Move left" style="cursor: pointer;"><div class="knob-fill" style="height: 0%;"></div><span class="knob-plus">+</span></button>
+                <div class="tile-value">0</div>
+              </div>
+              <div class="param-tile" data-tile="nudge-right">
+                <div class="tile-header">▶</div>
+                <button id="nudgeRight" class="knob" title="Move right" style="cursor: pointer;"><div class="knob-fill" style="height: 0%;"></div><span class="knob-plus">+</span></button>
+                <div class="tile-value">0</div>
+              </div>
+              <div class="param-tile" data-tile="nudge-step">
+                <div class="tile-header">STEP</div>
+                <div class="knob" data-knob="nudge-step" data-tooltip="Nudge step size in milliseconds (1-1000ms)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                <div class="tile-value" data-val="nudge-step">20</div>
+              </div>
+            </div>
+            <!-- Hidden input for JavaScript logic -->
+            <input id="nudgeStepMs" type="number" min="1" max="1000" value="20" style="display: none;" />
+          </div>
+
+          <!-- Zoom Control -->
+          <div class="grid-item grid-item-zoom">
+            <div class="zoom-control">
+              <div class="zoom-header">ZOOM</div>
+              <div class="zoom-value-display" id="zoomValue">1.0x</div>
+              <div class="zoom-slider-container">
+                <input id="waveZoom" type="range" min="0.1" max="5" step="0.1" value="1" class="zoom-slider" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Recall Per Pad Toggle -->
+          <div class="grid-item grid-item-recall">
+            <div class="param-grid">
+              <div class="param-tile" data-tile="recall">
+                <div class="tile-header">RECALL</div>
+                <div class="knob toggle-switch-knob active" data-knob="recall" data-tooltip="Recall parameters per pad - ON: smooth transition, OFF: instant"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                <div class="tile-value" data-val="recall">ON</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- File Controls -->
+          <div class="grid-item grid-item-file">
+            <div class="param-grid">
+              <div class="param-tile" data-tile="file-load">
+                <div class="tile-header">FILE</div>
+                <label for="fileInput" class="knob" data-tooltip="Load audio file (WAV, MP3, etc.)" style="cursor: pointer; display: flex; align-items: center; justify-content: center;"><div class="knob-fill" style="height: 0%;"></div><span class="knob-plus">+</span></label>
+                <input id="fileInput" type="file" accept="audio/*" class="visually-hidden" />
+                <div class="tile-value">0</div>
+              </div>
+              <div class="param-tile" data-tile="unlock">
+                <div class="tile-header">UNLOCK</div>
+                <button id="unlockBtn" class="knob" title="Unlock AudioContext" style="cursor: pointer;"><div class="knob-fill" style="height: 0%;"></div><span class="knob-plus">+</span></button>
+                <div class="tile-value">0</div>
+              </div>
+              <div class="param-tile" data-tile="clear-selection">
+                <div class="tile-header">CLEAR</div>
+                <button id="clearSelectionBtn" class="knob" title="Clear selection" style="cursor: pointer;"><div class="knob-fill" style="height: 0%;"></div><span class="knob-plus">✕</span></button>
+                <div class="tile-value">0</div>
+              </div>
+            </div>
+            <div id="fileName" class="filename" style="font-size: 8px; text-align: center; margin-top: 2px; color: var(--muted);" aria-live="polite"></div>
+          </div>
+
+          <!-- Recording Controls -->
+          <div class="grid-item grid-item-recording">
+            <div class="param-grid">
+              <div class="param-tile" data-tile="record-audio">
+                <div class="tile-header">REC-A</div>
+                <button id="recordBtn" class="knob" title="Start audio recording" style="cursor: pointer;"><div class="knob-fill" style="height: 0%;"></div><span class="knob-plus">+</span></button>
+                <div class="tile-value">0</div>
+              </div>
+              <div class="param-tile" data-tile="record-video">
+                <div class="tile-header">REC-V</div>
+                <button id="recordVideoBtn" class="knob" title="Start video + audio recording" style="cursor: pointer;"><div class="knob-fill" style="height: 0%;"></div><span class="knob-plus">+</span></button>
+                <div class="tile-value">0</div>
+              </div>
+              <div class="param-tile" data-tile="stop">
+                <div class="tile-header">STOP</div>
+                <button id="stopRecordBtn" class="knob" disabled title="Stop recording" style="cursor: pointer;"><div class="knob-fill" style="height: 0%;"></div><span class="knob-plus">+</span></button>
+                <div class="tile-value">0</div>
+              </div>
+            </div>
+            <div id="recordStatus" class="record-status" aria-live="polite">Ready</div>
+          </div>
+
+          <!-- Theme Toggle -->
+          <div class="grid-item grid-item-theme">
+            <div class="param-grid">
+              <div class="param-tile" data-tile="theme">
+                <div class="tile-header">THEME</div>
+                <button id="themeToggle" class="knob" title="Toggle theme (dark/light)" style="cursor: pointer;"><div class="knob-fill" style="height: 0%;"></div><span id="themeIcon" class="knob-plus"></span></button>
+                <div class="tile-value">0</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Value Display Box -->
+          <div id="valueDisplayBox" class="grid-item grid-item-value-display">
+            <div class="value-display-label">—</div>
+            <div class="value-display-value">—</div>
+          </div>
+        </aside>
+      </div>
     </div>
 
     <!-- Pad Edit Modal -->

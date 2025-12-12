@@ -34,9 +34,10 @@ const PAD_ICON = '▦';
 export function createCustomSelect(config: CustomSelectConfig) {
 	const { element, options, value, onChange } = config;
 	
-	// Clear existing content
+	// Clear existing content but preserve existing classes
+	const existingClasses = element.className.split(' ').filter(c => c && c !== 'custom-select');
 	element.innerHTML = '';
-	element.className = 'custom-select';
+	element.className = ['custom-select', ...existingClasses].filter(Boolean).join(' ');
 	
 	// Create button (visible element)
 	const button = document.createElement('button');

@@ -277,7 +277,10 @@ export function createFloatingPanelManager() {
 				if (state.width) config.element.style.width = `${state.width}px`;
 				if (state.height) config.element.style.height = `${state.height}px`;
 			} catch (e) {
-				console.warn('Failed to load panel state:', e);
+				// Silently fail - panel state loading is optional
+				if (import.meta.env.DEV) {
+					console.warn('Failed to load panel state:', e);
+				}
 			}
 		}
 		config.element.dataset.panelId = panelId;

@@ -25,6 +25,7 @@ export type BaseParams = {
 export type MappingResult = {
     granular: Partial<GranularParams>;
     effects: Partial<EffectsParams>;
+    selectionPos?: number; // Interpolated selection position
 };
 
 export class ParameterMapper {
@@ -61,6 +62,7 @@ export class ParameterMapper {
 
         const granularUpdate: Partial<GranularParams> = {};
         const fxUpdate: Partial<EffectsParams> = {};
+        let selectionPosUpdate: number | undefined = undefined;
 
         for (const [paramId, infl] of influenceMap.entries()) {
             const meta = PARAMS.find(p => p.id === paramId);
@@ -76,21 +78,31 @@ export class ParameterMapper {
                 baseVal = baseParams.selectionPos ?? 0;
             }
 
-            // Interpolate towards MAX based on influence
-            const targetVal = meta.max;
             // Clamp influence to 0..1 just in case
             const safeInfl = Math.max(0, Math.min(1, infl));
+            
+            // Use full range interpolation for maximum effect
+            // The bilinear weights already provide smooth transitions
+            const targetVal = meta.max;
             const newVal = baseVal + (targetVal - baseVal) * safeInfl;
+            
+            // Clamp to valid range
+            const clampedVal = Math.max(meta.min, Math.min(meta.max, newVal));
 
             if (meta.kind === 'granular') {
-                (granularUpdate as any)[meta.id] = newVal;
+                (granularUpdate as any)[meta.id] = clampedVal;
             } else if (meta.kind === 'fx') {
-                (fxUpdate as any)[meta.id] = newVal;
+                (fxUpdate as any)[meta.id] = clampedVal;
+            } else if (meta.kind === 'selection') {
+                selectionPosUpdate = clampedVal;
             }
-            // Selection position update logic is typically handled outside due to buffer dependency
         }
 
-        return { granular: granularUpdate, effects: fxUpdate };
+        const result: MappingResult = { granular: granularUpdate, effects: fxUpdate };
+        if (selectionPosUpdate !== undefined) {
+            result.selectionPos = selectionPosUpdate;
+        }
+        return result;
     }
 }
 

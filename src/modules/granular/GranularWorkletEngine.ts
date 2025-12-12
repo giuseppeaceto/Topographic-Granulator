@@ -37,18 +37,20 @@ function getWorkletPath(): string {
 	}
 }
 
+import { logger } from '../utils/logger';
+
 export async function createGranularWorkletEngine(ctx: AudioContext): Promise<GranularWorkletEngine> {
 	if (!('audioWorklet' in ctx)) {
 		throw new Error('AudioWorklet non supportato nel browser');
 	}
 	// load processor with correct path
 	const workletPath = getWorkletPath();
-	console.log('Loading worklet from:', workletPath);
+	logger.log('Loading worklet from:', workletPath);
 	try {
 		await ctx.audioWorklet.addModule(workletPath);
-		console.log('Worklet loaded successfully from:', workletPath);
+		logger.log('Worklet loaded successfully from:', workletPath);
 	} catch (error) {
-		console.error('Failed to load worklet from:', workletPath, error);
+		logger.error('Failed to load worklet from:', workletPath, error);
 		// Try fallback path logic
 		let fallbackPath = '';
 		if (workletPath.startsWith('./')) {
@@ -59,12 +61,12 @@ export async function createGranularWorkletEngine(ctx: AudioContext): Promise<Gr
 			fallbackPath = '/' + workletPath;
 		}
 		
-		console.log('Trying fallback path:', fallbackPath);
+		logger.log('Trying fallback path:', fallbackPath);
 		try {
 			await ctx.audioWorklet.addModule(fallbackPath);
-			console.log('Worklet loaded successfully from fallback:', fallbackPath);
+			logger.log('Worklet loaded successfully from fallback:', fallbackPath);
 		} catch (fallbackError) {
-			console.error('Failed to load worklet from fallback:', fallbackPath, fallbackError);
+			logger.error('Failed to load worklet from fallback:', fallbackPath, fallbackError);
 			// Don't throw immediately, let's see if we can still create the node (sometimes addModule fails spuriously but works)
 			// But usually if this fails, the next step fails.
 			throw new Error(`Failed to load audio worklet from ${workletPath} and ${fallbackPath}: ${fallbackError}`);
@@ -74,18 +76,18 @@ export async function createGranularWorkletEngine(ctx: AudioContext): Promise<Gr
 	try {
 		const node = new AudioWorkletNode(ctx, 'granular-processor', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] });
 		node.onprocessorerror = (err) => {
-			console.error('AudioWorkletProcessor error:', err);
+			logger.error('AudioWorkletProcessor error:', err);
 		};
 
 		// --- WASM LOADING ---
 		try {
-			console.log('Fetching WASM from:', wasmUrl);
+			logger.log('Fetching WASM from:', wasmUrl);
 			const response = await fetch(wasmUrl);
 			const wasmBytes = await response.arrayBuffer();
-			console.log('Sending WASM bytes to worklet, size:', wasmBytes.byteLength);
+			logger.log('Sending WASM bytes to worklet, size:', wasmBytes.byteLength);
 			node.port.postMessage({ type: 'loadWasm', wasmBytes });
 		} catch (wasmErr) {
-			console.error('Failed to load WASM module:', wasmErr);
+			logger.error('Failed to load WASM module:', wasmErr);
 		}
 		// --------------------
 		
@@ -110,7 +112,7 @@ export async function createGranularWorkletEngine(ctx: AudioContext): Promise<Gr
 			
 			// Safety check: decode failures or empty buffers
 			if (!b.numberOfChannels) {
-				console.error('Buffer has no channels');
+				logger.error('Buffer has no channels');
 				return;
 			}
 
@@ -123,11 +125,11 @@ export async function createGranularWorkletEngine(ctx: AudioContext): Promise<Gr
 				channels.push(copy);
 			}
 			
-            console.log('GranularWorkletEngine: Sending buffer to worklet, channels:', channels.length, 'length:', b.length);
+            logger.log('GranularWorkletEngine: Sending buffer to worklet, channels:', channels.length, 'length:', b.length);
 			try {
 				node.port.postMessage({ type: 'setBuffer', channels });
 			} catch (msgError) {
-				console.error('Failed to postMessage to worklet:', msgError);
+				logger.error('Failed to postMessage to worklet:', msgError);
 			}
 			
 			// Initialize region
@@ -206,7 +208,7 @@ export async function createGranularWorkletEngine(ctx: AudioContext): Promise<Gr
 
 		return { connect, disconnect, setBuffer, setRegion, setParams, setEffectParams, setAllParams, trigger, stop };
 	} catch (nodeError) {
-		console.error('Error creating AudioWorkletNode:', nodeError);
+		logger.error('Error creating AudioWorkletNode:', nodeError);
 		throw nodeError;
 	}
 }

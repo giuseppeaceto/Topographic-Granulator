@@ -117,60 +117,118 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 		const mid = h / 2;
 		const verticalScale = h * 0.9 * drawScale;
 		
-		// Particle/Dot rendering
-		const stepX = 12; // Spacing between vertical columns (less dense)
-		const stepY = 10; // Spacing between dots vertically (less dense)
+		// Neumorphic continuous waveform with smooth curves and depth
+		// Create gradient for waveform fill (vertical gradient for depth)
+		const fillGradient = ctx2d.createLinearGradient(0, 0, 0, h);
+		const strokeGradient = ctx2d.createLinearGradient(0, 0, 0, h);
 		
-		ctx2d.fillStyle = dotColor;
-
-		for (let x = 0; x < w; x += stepX) {
-			// Find max amplitude in this horizontal slice
-			let maxAmp = 0;
-			for (let k = 0; k < stepX && x + k < w; k++) {
-				const v = samples[x + k];
-				if (v > maxAmp) maxAmp = v;
-			}
-
-			// Threshold to avoid drawing noise in silence
-			if (maxAmp < 0.005) {
-				// Optional: Draw a single center dot for silence
-				if (x % (stepX * 2) === 0) {
-					ctx2d.globalAlpha = 0.2;
-					ctx2d.beginPath();
-					ctx2d.arc(x, mid, 1.5, 0, Math.PI * 2);
-					ctx2d.fill();
-					ctx2d.globalAlpha = 1.0;
-				}
-				continue;
-			}
-
-			const height = maxAmp * verticalScale;
-			const top = mid - height;
-			const bottom = mid + height;
-
-			// Draw vertical column of dots
-			for (let y = mid; y >= top; y -= stepY) {
-				// Vary dot size or opacity based on distance from center?
-				// Reference has fairly uniform dots, maybe slightly smaller at edges
-				const dist = (mid - y) / height; // 0 to 1
-				const size = 3.0 - (dist * 1.0); 
-				
-				ctx2d.globalAlpha = 1.0 - (dist * 0.3); // Fade out slightly at peaks
-				ctx2d.beginPath();
-				ctx2d.arc(x, y, size, 0, Math.PI * 2);
-				ctx2d.fill();
-			}
-			// Mirror for bottom half
-			for (let y = mid + stepY; y <= bottom; y += stepY) {
-				const dist = (y - mid) / height;
-				const size = 3.0 - (dist * 1.0);
-				
-				ctx2d.globalAlpha = 1.0 - (dist * 0.3);
-				ctx2d.beginPath();
-				ctx2d.arc(x, y, size, 0, Math.PI * 2);
-				ctx2d.fill();
-			}
+		if (isLight) {
+			// Light theme: subtle neumorphic gradient
+			fillGradient.addColorStop(0, 'rgba(66, 66, 69, 0.12)');
+			fillGradient.addColorStop(0.5, 'rgba(66, 66, 69, 0.22)');
+			fillGradient.addColorStop(1, 'rgba(66, 66, 69, 0.12)');
+			strokeGradient.addColorStop(0, 'rgba(66, 66, 69, 0.35)');
+			strokeGradient.addColorStop(0.5, 'rgba(66, 66, 69, 0.55)');
+			strokeGradient.addColorStop(1, 'rgba(66, 66, 69, 0.35)');
+		} else {
+			// Dark theme: brighter neumorphic gradient
+			fillGradient.addColorStop(0, 'rgba(179, 179, 179, 0.18)');
+			fillGradient.addColorStop(0.5, 'rgba(179, 179, 179, 0.32)');
+			fillGradient.addColorStop(1, 'rgba(179, 179, 179, 0.18)');
+			strokeGradient.addColorStop(0, 'rgba(179, 179, 179, 0.45)');
+			strokeGradient.addColorStop(0.5, 'rgba(179, 179, 179, 0.65)');
+			strokeGradient.addColorStop(1, 'rgba(179, 179, 179, 0.45)');
 		}
+		
+		// Helper function to create smooth curve using quadratic bezier
+		const drawSmoothWaveform = (samples: Float32Array, invert: boolean = false) => {
+			ctx2d.beginPath();
+			ctx2d.moveTo(0, mid);
+			
+			// Use quadratic curves for smooth waveform
+			for (let x = 0; x < w; x++) {
+				const amp = samples[x] || 0;
+				const height = amp * verticalScale;
+				const y = invert ? mid + height : mid - height;
+				
+				if (x === 0) {
+					ctx2d.lineTo(x, y);
+				} else {
+					// Use previous point as control point for smooth curve
+					const prevAmp = samples[Math.max(0, x - 1)] || 0;
+					const prevHeight = prevAmp * verticalScale;
+					const prevY = invert ? mid + prevHeight : mid - prevHeight;
+					const controlX = x - 0.5;
+					const controlY = (prevY + y) / 2;
+					ctx2d.quadraticCurveTo(controlX, controlY, x, y);
+				}
+			}
+			
+			// Complete the path for fill
+			ctx2d.lineTo(w, mid);
+			ctx2d.lineTo(0, mid);
+			ctx2d.closePath();
+		};
+		
+		// Draw top waveform (positive values) with shadow
+		drawSmoothWaveform(samples, false);
+		
+		// Draw shadow for depth (neumorphic effect)
+		ctx2d.save();
+		ctx2d.shadowColor = isLight ? 'rgba(0, 0, 0, 0.15)' : 'rgba(0, 0, 0, 0.4)';
+		ctx2d.shadowBlur = 4;
+		ctx2d.shadowOffsetX = 2;
+		ctx2d.shadowOffsetY = 2;
+		ctx2d.fillStyle = fillGradient;
+		ctx2d.fill();
+		ctx2d.restore();
+		
+		// Draw main fill
+		ctx2d.fillStyle = fillGradient;
+		ctx2d.fill();
+		
+		// Draw top stroke with gradient
+		drawSmoothWaveform(samples, false);
+		ctx2d.strokeStyle = strokeGradient;
+		ctx2d.lineWidth = 2;
+		ctx2d.lineCap = 'round';
+		ctx2d.lineJoin = 'round';
+		ctx2d.stroke();
+		
+		// Draw bottom waveform (negative values, mirrored) with shadow
+		drawSmoothWaveform(samples, true);
+		
+		// Draw shadow for depth
+		ctx2d.save();
+		ctx2d.shadowColor = isLight ? 'rgba(0, 0, 0, 0.15)' : 'rgba(0, 0, 0, 0.4)';
+		ctx2d.shadowBlur = 4;
+		ctx2d.shadowOffsetX = 2;
+		ctx2d.shadowOffsetY = -2;
+		ctx2d.fillStyle = fillGradient;
+		ctx2d.fill();
+		ctx2d.restore();
+		
+		// Draw main fill
+		ctx2d.fillStyle = fillGradient;
+		ctx2d.fill();
+		
+		// Draw bottom stroke with gradient
+		drawSmoothWaveform(samples, true);
+		ctx2d.strokeStyle = strokeGradient;
+		ctx2d.lineWidth = 2;
+		ctx2d.lineCap = 'round';
+		ctx2d.lineJoin = 'round';
+		ctx2d.stroke();
+		
+		// Add subtle center line for reference (neumorphic style)
+		ctx2d.strokeStyle = isLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.08)';
+		ctx2d.lineWidth = 1;
+		ctx2d.setLineDash([2, 4]);
+		ctx2d.beginPath();
+		ctx2d.moveTo(0, mid);
+		ctx2d.lineTo(w, mid);
+		ctx2d.stroke();
+		ctx2d.setLineDash([]);
 		
 		ctx2d.globalAlpha = 1.0;
 

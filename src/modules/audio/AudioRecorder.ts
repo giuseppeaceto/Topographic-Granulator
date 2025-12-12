@@ -1,3 +1,5 @@
+import { logger } from '../utils/logger';
+
 export type AudioRecorder = {
 	start: (withVideo?: boolean) => Promise<void>;
 	stop: () => Promise<Blob | null>;
@@ -21,6 +23,7 @@ export function createAudioRecorder(
 	let audioStreamDestination: MediaStreamAudioDestinationNode | null = null;
 	let recordedChunks: Blob[] = [];
 	let videoMimeType: string = 'video/webm'; // Track the mime type used
+	let videoTrackEndedHandler: (() => void) | null = null; // Store handler reference for cleanup
 	
 	function pickMimeType(): string | null {
 		// Prefer explicit audio+video codecs; fall back to generic webm
@@ -43,23 +46,23 @@ export function createAudioRecorder(
 		if (mime) {
 			try {
 				const rec = new MediaRecorder(stream, { mimeType: mime });
-				console.log('[Recorder] Created with mime', mime);
+				logger.log('[Recorder] Created with mime', mime);
 				return { recorder: rec, mime };
 			} catch (err) {
-				console.warn('[Recorder] Failed with mime', mime, err);
+				logger.warn('[Recorder] Failed with mime', mime, err);
 			}
 		}
 		// Fallback: let browser pick
 		const fallbackMime = 'video/webm';
 		try {
 			const rec = new MediaRecorder(stream, { mimeType: fallbackMime });
-			console.log('[Recorder] Created with fallback mime', fallbackMime);
+			logger.log('[Recorder] Created with fallback mime', fallbackMime);
 			return { recorder: rec, mime: fallbackMime };
 		} catch (err) {
-			console.warn('[Recorder] Failed with fallback webm', err);
+			logger.warn('[Recorder] Failed with fallback webm', err);
 		}
 		// Last resort: no options
-		console.log('[Recorder] Trying without mime options');
+		logger.log('[Recorder] Trying without mime options');
 		return { recorder: new MediaRecorder(stream), mime: '' };
 	}
 	const sampleRate = audioContext.sampleRate;
@@ -143,7 +146,7 @@ export function createAudioRecorder(
 				
 				return await navigator.mediaDevices.getUserMedia(constraints as any);
 			} catch (err) {
-				console.warn('[Recorder] Electron capture failed, falling back to getDisplayMedia');
+				logger.warn('[Recorder] Electron capture failed, falling back to getDisplayMedia');
 				// Fallback to standard API if Electron specific method fails
 			}
 		}
@@ -156,13 +159,13 @@ export function createAudioRecorder(
 		};
 
 		try {
-			console.log('[Recorder] Requesting display media with audio…');
+			logger.log('[Recorder] Requesting display media with audio…');
 			return await navigator.mediaDevices.getDisplayMedia({
 				video: videoConstraints,
 				audio: true
 			});
 		} catch (err) {
-			console.warn('[Recorder] Failed to get display media with audio, retrying without audio...', err);
+			logger.warn('[Recorder] Failed to get display media with audio, retrying without audio...', err);
 			return await navigator.mediaDevices.getDisplayMedia({
 				video: videoConstraints,
 				audio: false
@@ -180,7 +183,7 @@ export function createAudioRecorder(
 			// Video recording mode: capture screen (video) + app audio (preferito), fallback a system audio o solo video
 			try {
 				videoStream = await getScreenStream();
-				console.log('[Recorder] Display media acquired',
+				logger.log('[Recorder] Display media acquired',
 					{ videoTracks: videoStream.getVideoTracks().length, audioTracks: videoStream.getAudioTracks().length });
 
 				const videoTrack = videoStream.getVideoTracks()[0];
@@ -189,11 +192,13 @@ export function createAudioRecorder(
 				}
 
 				// Stop video stream when user stops sharing
-				videoStream.getVideoTracks()[0]?.addEventListener('ended', () => {
+				// Store handler reference for cleanup
+				videoTrackEndedHandler = () => {
 					if (isActive) {
 						stop();
 					}
-				});
+				};
+				videoTrack.addEventListener('ended', videoTrackEndedHandler);
 
 				// Create app-audio stream
 				audioStreamDestination = audioContext.createMediaStreamDestination();
@@ -209,7 +214,7 @@ export function createAudioRecorder(
 				variants.push({ video: videoTrack, audio: null, label: 'video only' });
 
 				// Log support
-				console.log('[Recorder] MIME support', {
+				logger.log('[Recorder] MIME support', {
 					'video/webm;codecs=vp9,opus': MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus'),
 					'video/webm;codecs=vp8,opus': MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus'),
 					'video/webm;codecs=vp9': MediaRecorder.isTypeSupported('video/webm;codecs=vp9'),
@@ -223,7 +228,7 @@ export function createAudioRecorder(
 					const combinedStream = new MediaStream();
 					combinedStream.addTrack(variant.video);
 					if (variant.audio) combinedStream.addTrack(variant.audio);
-					console.log('[Recorder] Trying variant', variant.label, {
+					logger.log('[Recorder] Trying variant', variant.label, {
 						video: combinedStream.getVideoTracks().length,
 						audio: combinedStream.getAudioTracks().length
 					});
@@ -231,11 +236,11 @@ export function createAudioRecorder(
 						const { recorder, mime } = tryCreateMediaRecorder(combinedStream);
 						mediaRecorder = recorder;
 						videoMimeType = mime || recorder.mimeType || 'video/webm';
-						console.log('[Recorder] Created MediaRecorder with mime', videoMimeType, 'variant', variant.label);
+						logger.log('[Recorder] Created MediaRecorder with mime', videoMimeType, 'variant', variant.label);
 						created = true;
 						break;
 					} catch (err) {
-						console.warn('[Recorder] MediaRecorder failed for variant', variant.label, err);
+						logger.warn('[Recorder] MediaRecorder failed for variant', variant.label, err);
 					}
 				}
 
@@ -252,9 +257,14 @@ export function createAudioRecorder(
 				mediaRecorder.start(100); // Collect data every 100ms
 				isActive = true;
 			} catch (error) {
-				console.error('Errore avvio registrazione video:', error);
+				logger.error('Errore avvio registrazione video:', error);
 				// Cleanup on error
 				if (videoStream) {
+					// Remove event listener before stopping tracks
+					if (videoTrackEndedHandler) {
+						videoStream.getVideoTracks()[0]?.removeEventListener('ended', videoTrackEndedHandler);
+						videoTrackEndedHandler = null;
+					}
 					videoStream.getTracks().forEach(track => track.stop());
 					videoStream = null;
 				}
@@ -327,6 +337,11 @@ export function createAudioRecorder(
 					
 					// Cleanup
 					if (videoStream) {
+						// Remove event listener before stopping tracks
+						if (videoTrackEndedHandler && videoStream.getVideoTracks()[0]) {
+							videoStream.getVideoTracks()[0].removeEventListener('ended', videoTrackEndedHandler);
+							videoTrackEndedHandler = null;
+						}
 						videoStream.getTracks().forEach(track => track.stop());
 						videoStream = null;
 					}

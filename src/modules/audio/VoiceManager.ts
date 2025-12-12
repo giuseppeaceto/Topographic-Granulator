@@ -23,12 +23,16 @@ export type Voice = {
     currentY: number;
     isManualOverride: boolean; // True if user is manually dragging XY
 
-	baseParams: { granular: GranularParams; effects: EffectsParams; xy: { x: number; y: number } } | null;
+	baseParams: { granular: GranularParams; effects: EffectsParams; xy: { x: number; y: number }; selectionPos?: number } | null;
     // Cache last sent params to avoid flooding the audio thread
     lastSentGranular: Partial<GranularParams> | null;
     lastSentFx: Partial<EffectsParams> | null;
+    lastSelectionPos: number | null;
 
 	cornerMapping: { tl: string; tr: string; bl: string; br: string } | null;
+    
+    // Store region for selectionPos calculation
+    region: Region | null;
     
     // Store indices for real-time lookup (Pads Mode)
     padMorphIndices?: {
@@ -75,7 +79,9 @@ export class VoiceManager {
 				baseParams: null,
                 lastSentGranular: null,
                 lastSentFx: null,
-				cornerMapping: null
+                lastSelectionPos: null,
+				cornerMapping: null,
+                region: null
 			});
 		}
         // Start the internal automation loop
@@ -85,24 +91,37 @@ export class VoiceManager {
     // --- AUTOMATION ENGINE ---
 
     private startAnimationLoop() {
+        let lastAudioUpdate = 0;
+        const AUDIO_UPDATE_INTERVAL = 33; // ~30fps for audio updates (throttle to reduce CPU)
+        
         const loop = () => {
-            this.updateVoices();
+            const now = performance.now();
+            const shouldUpdateAudio = (now - lastAudioUpdate) >= AUDIO_UPDATE_INTERVAL;
+            
+            this.updateVoices(shouldUpdateAudio);
+            
+            if (shouldUpdateAudio) {
+                lastAudioUpdate = now;
+            }
+            
             this.animationFrame = requestAnimationFrame(loop);
         };
         this.animationFrame = requestAnimationFrame(loop);
     }
 
-    private updateVoices() {
+    private updateVoices(updateAudio: boolean = true) {
         const now = performance.now();
 
         this.voices.forEach(voice => {
             if (!voice.active || !voice.baseParams) return;
 
+            // Early exit: if no motion path and not manual override, skip calculation
             // 1. Calculate Position (XY)
             // If manual override is active, we skip path calculation (currentX/Y are set by setVoiceXY)
             if (!voice.isManualOverride && voice.motionPath && voice.motionPath.length >= 2) {
+                const motionPath = voice.motionPath; // Type guard for TypeScript
                 const elapsed = (now - voice.motionStartTime) * voice.motionSpeed;
-                const totalDuration = voice.motionPath[voice.motionPath.length - 1].time;
+                const totalDuration = motionPath[motionPath.length - 1].time;
                 
                 if (totalDuration > 0) {
                     let t = 0;
@@ -125,31 +144,46 @@ export class VoiceManager {
                     }
 
                     // Interpolate Position
-                    const pos = this.interpolatePath(voice.motionPath, t);
+                    const pos = this.interpolatePath(motionPath, t);
                     voice.currentX = pos.x;
                     voice.currentY = pos.y;
                 }
             }
 
             // 2. Map XY to Parameters (Bilinear Interpolation)
-            this.applyXYToParams(voice);
+            // Only update audio thread if updateAudio is true (throttled to ~30fps)
+            // This reduces CPU load significantly when multiple pads are active
+            if (updateAudio) {
+                this.applyXYToParams(voice);
+            }
         });
     }
 
     private interpolatePath(path: MotionPoint[], t: number): { x: number, y: number } {
-        // Simple linear interpolation between points
-        let prev = path[0];
-        let next = path[path.length - 1];
+        // Optimized binary search for path interpolation (better performance with long paths)
+        if (path.length === 0) return { x: 0.5, y: 0.5 };
+        if (path.length === 1) return { x: path[0].x, y: path[0].y };
+        
+        // Clamp t to valid range
+        const lastTime = path[path.length - 1].time;
+        if (t <= 0) return { x: path[0].x, y: path[0].y };
+        if (t >= lastTime) return { x: path[path.length - 1].x, y: path[path.length - 1].y };
 
-        // Binary search or linear scan (linear is fine for short paths)
-        for (let i = 0; i < path.length - 1; i++) {
-            if (t >= path[i].time && t <= path[i+1].time) {
-                prev = path[i];
-                next = path[i+1];
-                break;
+        // Binary search for the segment containing t
+        let left = 0;
+        let right = path.length - 1;
+        
+        while (right - left > 1) {
+            const mid = Math.floor((left + right) / 2);
+            if (path[mid].time <= t) {
+                left = mid;
+            } else {
+                right = mid;
             }
         }
 
+        const prev = path[left];
+        const next = path[right];
         const duration = next.time - prev.time;
         const progress = duration > 0 ? (t - prev.time) / duration : 0;
         
@@ -166,14 +200,17 @@ export class VoiceManager {
         const weights = ParameterMapper.calculateWeights(voice.currentX, voice.currentY);
 
         // 2. Map Parameters using shared logic
-        const { granular: granularUpdate, effects: fxUpdate } = ParameterMapper.mapParams(
+        const { granular: granularUpdate, effects: fxUpdate, selectionPos: selectionPosUpdate } = ParameterMapper.mapParams(
             weights,
             voice.baseParams,
             voice.cornerMapping
         );
 
         // Apply to Engine with Dirty Checking
-        const EPSILON = 0.001; // Significant change threshold
+        // Increased EPSILON to reduce update frequency and CPU load
+        // 0.01 = 1% change threshold (was 0.001 = 0.1%)
+        // This significantly reduces audio thread updates when multiple pads are active
+        const EPSILON = 0.01; // Significant change threshold (1% of parameter range)
 
         // Helper to check diff
         const hasChanged = (newP: any, oldP: any | null) => {
@@ -194,6 +231,24 @@ export class VoiceManager {
             if (hasChanged(fxUpdate, voice.lastSentFx)) {
                 voice.engine.setEffectParams(fxUpdate);
                 voice.lastSentFx = { ...voice.lastSentFx, ...fxUpdate };
+            }
+        }
+        
+        // Apply selectionPos to region if calculated and changed
+        if (selectionPosUpdate !== undefined && this.buffer && voice.region) {
+            if (voice.lastSelectionPos === null || Math.abs(selectionPosUpdate - voice.lastSelectionPos) > EPSILON) {
+                const width = voice.region.end - voice.region.start;
+                const movable = Math.max(0, this.buffer.duration - width);
+                if (movable > 0) {
+                    const newStart = selectionPosUpdate * movable;
+                    const newEnd = newStart + width;
+                    // Clamp to buffer bounds
+                    const clampedStart = Math.max(0, Math.min(newStart, this.buffer.duration - width));
+                    const clampedEnd = Math.min(this.buffer.duration, clampedStart + width);
+                    
+                    voice.engine.setRegion(clampedStart, clampedEnd);
+                    voice.lastSelectionPos = selectionPosUpdate;
+                }
             }
         }
     }
@@ -255,13 +310,20 @@ export class VoiceManager {
         voice.currentY = xy.y;
 
         // Deep copy base params to avoid reference issues
-		voice.baseParams = { granular: { ...granular }, effects: { ...effects }, xy: { ...xy } };
+        // Calculate initial selectionPos from region
+        const regionWidth = region.end - region.start;
+        const movable = this.buffer ? Math.max(0, this.buffer.duration - regionWidth) : 0;
+        const initialSelectionPos = movable > 0 ? region.start / movable : 0;
+        
+		voice.baseParams = { granular: { ...granular }, effects: { ...effects }, xy: { ...xy }, selectionPos: initialSelectionPos };
 		voice.cornerMapping = cornerMapping ? { ...cornerMapping } : null;
         voice.padMorphIndices = padMorphIndices ? { ...padMorphIndices } : undefined;
+        voice.region = { ...region };
 
         // Reset dirty check cache on new trigger
         voice.lastSentGranular = null;
         voice.lastSentFx = null;
+        voice.lastSelectionPos = null;
 
 		// Set initial params
         voice.engine.setParams(granular);
@@ -359,6 +421,44 @@ export class VoiceManager {
     setVoiceMotionPath(padIndex: number, path: MotionPoint[] | null, mode: 'loop' | 'pingpong' | 'oneshot' | 'reverse' = 'loop', speed: number = 1.0) {
         // No longer needed - logic moved to main loop via MotionPanel events
         return;
+    }
+
+    // Update motion speed for a specific pad's active voice (live update without retrigger)
+    setVoiceMotionSpeed(padIndex: number, speed: number) {
+        const voice = this.getActiveVoiceForPad(padIndex);
+        if (voice && voice.active) {
+            voice.motionSpeed = speed;
+            // Don't reset manual override - allow user to continue controlling if they are
+        }
+    }
+
+    // Update motion mode for a specific pad's active voice (live update without retrigger)
+    setVoiceMotionMode(padIndex: number, mode: 'loop' | 'pingpong' | 'oneshot' | 'reverse') {
+        const voice = this.getActiveVoiceForPad(padIndex);
+        if (voice && voice.active) {
+            voice.motionMode = mode;
+            // Don't reset manual override - allow user to continue controlling if they are
+        }
+    }
+
+    /**
+     * Cleanup method to stop animation loop and release resources
+     * Should be called when VoiceManager is no longer needed (e.g., app shutdown)
+     */
+    destroy() {
+        // Stop animation loop to prevent memory leak
+        if (this.animationFrame !== null) {
+            cancelAnimationFrame(this.animationFrame);
+            this.animationFrame = null;
+        }
+
+        // Stop all voices
+        this.stopAll();
+
+        // Clear references
+        this.voices = [];
+        this.buffer = null;
+        this.paramProvider = null;
     }
 
     /*

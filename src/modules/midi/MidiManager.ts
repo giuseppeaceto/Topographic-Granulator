@@ -57,8 +57,38 @@ export class MidiManager {
 	on(cb: (e: MidiEvent) => void) {
 		this.listeners.push(cb);
 	}
+
+	/**
+	 * Remove an event listener
+	 * @param cb - The callback function to remove
+	 */
+	off(cb: (e: MidiEvent) => void) {
+		this.listeners = this.listeners.filter(l => l !== cb);
+	}
+
 	private emit(e: MidiEvent) {
 		this.listeners.forEach((cb) => cb(e));
+	}
+
+	/**
+	 * Cleanup method to release all resources
+	 * Should be called when MidiManager is no longer needed
+	 */
+	destroy() {
+		// Remove all listeners
+		this.listeners = [];
+		
+		// Remove event handlers from MIDI inputs
+		this.inputs.forEach(inp => {
+			inp.onmidimessage = null;
+		});
+		this.inputs = [];
+
+		// Clear MIDI access
+		if (this.access) {
+			this.access.onstatechange = null;
+			this.access = null;
+		}
 	}
 }
 

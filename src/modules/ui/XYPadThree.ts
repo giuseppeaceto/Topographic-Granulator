@@ -22,7 +22,7 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 	// Function to update clear color based on theme
 	function updateClearColor() {
 		const root = getComputedStyle(document.documentElement);
-		const bgColor = root.getPropertyValue('--waveform-bg').trim() || '#111111';
+		const bgColor = root.getPropertyValue('--xy-pad-bg').trim() || root.getPropertyValue('--waveform-bg').trim() || '#111111';
 		// Convert hex string to number (remove # if present)
 		const hex = bgColor.replace('#', '');
 		const color = parseInt(hex, 16);
@@ -40,12 +40,16 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 	// enlarge slightly
 	scene.scale.set(1.12, 1.12, 1);
 
-	// Lighting for the 3D sphere
-	const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+	// Lighting for the 3D sphere - softer, more neumorphic lighting
+	const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
 	scene.add(ambientLight);
-	const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-	directionalLight.position.set(1, 1, 1);
-	scene.add(directionalLight);
+	// Multiple directional lights for softer, more diffused neumorphic effect
+	const directionalLight1 = new THREE.DirectionalLight(0xffffff, 0.6);
+	directionalLight1.position.set(1, 1, 1);
+	scene.add(directionalLight1);
+	const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.4);
+	directionalLight2.position.set(-1, -1, 0.5);
+	scene.add(directionalLight2);
 
 	// Wireframe grid geometry
 	const gridCols = 18;
@@ -98,17 +102,18 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 	const lines = new THREE.LineSegments(geometry, material);
 	scene.add(lines);
 
-	// Knob (3D sphere) rendered above the grid
+	// Knob (3D sphere) rendered above the grid - neumorphic style
 	const knobGeom = new THREE.SphereGeometry(1, 16, 16);
 	const knobMat = new THREE.MeshStandardMaterial({ 
 		color: 0xd0d0d0,
-		metalness: 0.3,
-		roughness: 0.4
+		metalness: 0.0, // No metallic look for neumorphic style
+		roughness: 0.75, // More matte, less reflective for neumorphic look
+		flatShading: false // Smooth shading but with high roughness
 	});
 	const knob = new THREE.Mesh(knobGeom, knobMat);
 	scene.add(knob);
 	knob.scale.set(0.04, 0.04, 0.04); // scale to world units (più grande)
-	knob.position.z = 0.02;
+	knob.position.z = 0.025; // Slightly higher for more prominent elevation effect
 
     // Ghost Cursors Group
     const ghostsGroup = new THREE.Group();
@@ -441,6 +446,7 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 		}
 
 		// For each vertex compute height and brightness based on distance to knob
+		// Enhanced contrast for neumorphic effect
 		let c = 0;
 		let p = 0;
 		
@@ -451,7 +457,8 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 			const dx1 = x1 - kx, dy1 = y1 - ky;
 			const d1 = dx1 * dx1 + dy1 * dy1;
 			const w1 = d1 < influenceSq ? 1 - Math.sqrt(d1 / influenceSq) : 0;
-			const minI = 0.18, maxI = 0.92;
+			// Increased contrast range for more pronounced neumorphic depth (darker shadows, brighter highlights)
+			const minI = 0.12, maxI = 0.95;
 			const i1 = minI + (maxI - minI) * w1;
 			const z1 = baseHeight(x1, y1) + rippleHeight(x1, y1) + densityPulse(x1, y1) + 0.18 * w1; // mountains + ripple + density pulse + interactive peak
 			linePositions[p + 2] = z1;
@@ -462,6 +469,7 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 			const dx2 = x2 - kx, dy2 = y2 - ky;
 			const d2 = dx2 * dx2 + dy2 * dy2;
 			const w2 = d2 < influenceSq ? 1 - Math.sqrt(d2 / influenceSq) : 0;
+			// Same enhanced contrast for endpoint 2
 			const i2 = minI + (maxI - minI) * w2;
 			const z2 = baseHeight(x2, y2) + rippleHeight(x2, y2) + densityPulse(x2, y2) + 0.18 * w2;
 			linePositions[p + 5] = z2;

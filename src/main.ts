@@ -16,10 +16,12 @@ import { MidiManager, type MidiMapping, loadMappings, saveMappings } from './mod
 import { createPadParamStore, defaultEffects, defaultGranular } from './modules/editor/PadParamStore';
 import type { GranularParams } from './modules/granular/GranularWorkletEngine';
 import type { EffectsParams } from './modules/effects/EffectsChain';
-import { createFloatingPanelManager } from './modules/ui/FloatingPanelManager';
 import { createCustomSelect, type SelectOption } from './modules/ui/CustomSelect';
 import { createThemeManager } from './modules/ui/ThemeManager';
 import { createUpdateManager } from './modules/utils/updateManager';
+import { createBetaExpirationManager } from './modules/utils/betaExpirationManager';
+import { initAllTooltips } from './modules/ui/TooltipManager';
+import { logger } from './modules/utils/logger';
 
 type AppState = {
 	contextMgr: ReturnType<typeof createAudioContextManager>;
@@ -109,15 +111,24 @@ const themeManager = createThemeManager();
 themeManager.init();
 const initialTheme = themeManager.getTheme();
 // Update icon and logo based on initial theme
-themeIcon.textContent = initialTheme === 'dark' ? '☀' : '🌙';
+themeIcon.innerHTML = initialTheme === 'dark' 
+	? '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="5" fill="currentColor"/><path d="M12 1v4M12 19v4M23 12h-4M5 12H1M19.07 4.93l-2.83 2.83M7.76 16.24l-2.83 2.83M19.07 19.07l-2.83-2.83M7.76 7.76L4.93 4.93" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg>'
+	: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" fill="currentColor"/></svg>';
 updateLogo(initialTheme);
 
 // Theme toggle handler
 if (themeToggleBtn && themeIcon) {
 	themeToggleBtn.addEventListener('click', () => {
 		const newTheme = themeManager.toggle();
-		themeIcon.textContent = newTheme === 'dark' ? '☀' : '🌙';
+		themeIcon.innerHTML = newTheme === 'dark'
+			? '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="5" fill="currentColor"/><path d="M12 1v4M12 19v4M23 12h-4M5 12H1M19.07 4.93l-2.83 2.83M7.76 16.24l-2.83 2.83M19.07 19.07l-2.83-2.83M7.76 7.76L4.93 4.93" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg>'
+			: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" fill="currentColor"/></svg>';
 		updateLogo(newTheme);
+		// Update button fill visual (toggle between filled/unfilled)
+		const fill = themeToggleBtn.querySelector('.knob-fill') as HTMLElement | null;
+		const valEl = themeToggleBtn.closest('.param-tile')?.querySelector('.tile-value:not([data-val])') as HTMLElement | null;
+		if (fill) fill.style.height = newTheme === 'dark' ? '100%' : '0%';
+		if (valEl) valEl.textContent = newTheme === 'dark' ? '1' : '0';
 	});
 }
 
@@ -324,63 +335,15 @@ if (padEditDelete) {
 	});
 }
 
-// Initialize Floating Panel Manager
-const panelManager = createFloatingPanelManager();
-
-// Register floating panels with default positions
-const waveformPanel = document.getElementById('panel-waveform') as HTMLElement;
-const parametersPanel = document.getElementById('panel-parameters') as HTMLElement;
-const effectsPanel = document.getElementById('panel-effects') as HTMLElement;
-
-if (waveformPanel) {
-	panelManager.registerPanel({
-		id: 'waveform',
-		element: waveformPanel,
-		defaultPosition: { x: 20, y: 20 },
-		defaultSize: { width: 500, height: 400 },
-		minSize: { width: 350, height: 250 },
-		resizable: true
-	});
-}
-
-if (parametersPanel) {
-	panelManager.registerPanel({
-		id: 'parameters',
-		element: parametersPanel,
-		defaultPosition: { x: window.innerWidth - 300, y: 420 },
-		defaultSize: { width: 260, height: 280 },
-		minSize: { width: 240, height: 260 },
-		resizable: true
-	});
-}
-
-if (effectsPanel) {
-	panelManager.registerPanel({
-		id: 'effects',
-		element: effectsPanel,
-		defaultPosition: { x: window.innerWidth - 300, y: 20 },
-		defaultSize: { width: 260, height: 400 },
-		minSize: { width: 240, height: 380 },
-		resizable: true
-	});
-}
-
-const motionPanel = document.getElementById('panel-motion') as HTMLElement;
+// Motion panel initialization
 let motionCtrl: ReturnType<typeof createMotionPanel> | null = null;
-if (motionPanel) {
-	panelManager.registerPanel({
-		id: 'motion',
-		element: motionPanel,
-		defaultPosition: { x: 20, y: 440 },
-		defaultSize: { width: 250, height: 350 },
-		minSize: { width: 200, height: 300 },
-		resizable: true
-	});
+const motionCanvas = document.getElementById('motionCanvas') as HTMLCanvasElement;
+if (motionCanvas) {
 
 	motionCtrl = createMotionPanel({
 		canvas: document.getElementById('motionCanvas') as HTMLCanvasElement,
 		cursor: document.getElementById('motionCursor') as HTMLElement,
-		recordBtn: document.getElementById('motionRecordBtn') as HTMLButtonElement,
+		recordBtn: document.getElementById('motionRecordBtn') as HTMLButtonElement | undefined,
 		playBtn: document.getElementById('motionPlayBtn') as HTMLButtonElement,
 		clearBtn: document.getElementById('motionClearBtn') as HTMLButtonElement,
 		loopModeSelect: document.getElementById('motionLoopMode') as HTMLSelectElement,
@@ -407,14 +370,27 @@ if (motionPanel) {
                     triggerPad(state.activePadIndex);
                 }
             }
+            // Update button fill visual
+            const motionPlayBtn = document.getElementById('motionPlayBtn') as HTMLButtonElement;
+            if (motionPlayBtn) {
+                const fill = motionPlayBtn.querySelector('.knob-fill') as HTMLElement | null;
+                const valEl = motionPlayBtn.closest('.param-tile')?.querySelector('.tile-value:not([data-val])') as HTMLElement | null;
+                if (fill) fill.style.height = isPlaying ? '100%' : '0%';
+                if (valEl) valEl.textContent = isPlaying ? '1' : '0';
+            }
 		},
         onSpeedChange: (speed) => {
              if (state.activePadIndex != null) {
                 // Update store
                 const current = state.padParams.get(state.activePadIndex);
                 state.padParams.setMotionParams(state.activePadIndex, current.motionMode || 'loop', speed);
-                // Retrigger to update engine
-                triggerPad(state.activePadIndex);
+                // Update voice directly without retrigger to preserve manual override state
+                if (state.voiceManager?.isPadPlaying(state.activePadIndex)) {
+                    state.voiceManager.setVoiceMotionSpeed(state.activePadIndex, speed);
+                } else {
+                    // Only trigger if pad is not playing
+                    triggerPad(state.activePadIndex);
+                }
              }
         }
 	});
@@ -422,15 +398,94 @@ if (motionPanel) {
     // Listen for mode changes (Loop, PingPong...) from the DOM element directly or add callback to MotionPanel?
     // MotionPanel has internal listener but exposed `loopModeSelect`.
     const motionLoopSelect = document.getElementById('motionLoopMode') as HTMLSelectElement;
+    const motionLoopOptions = ['loop', 'pingpong', 'oneshot', 'reverse'];
+    const motionLoopLabels = ['Loop', 'PingPong', 'OneShot', 'Reverse'];
+    
+    // Update option selector visual
+    const updateMotionLoopSelector = () => {
+        const selectorEl = document.querySelector('.option-selector[data-selector="motion-loop"]') as HTMLElement | null;
+        const labelEl = selectorEl?.querySelector('.option-selector-label[data-label="motion-loop"]') as HTMLElement | null;
+        if (selectorEl && labelEl && motionLoopSelect) {
+            const currentIdx = motionLoopOptions.indexOf(motionLoopSelect.value);
+            if (currentIdx >= 0) {
+                labelEl.textContent = motionLoopLabels[currentIdx];
+            }
+        }
+    };
+    
     motionLoopSelect?.addEventListener('change', () => {
          if (state.activePadIndex != null) {
             const current = state.padParams.get(state.activePadIndex);
             const mode = motionLoopSelect.value as any;
             state.padParams.setMotionParams(state.activePadIndex, mode, current.motionSpeed || 1.0);
-             // Retrigger to update engine
-            triggerPad(state.activePadIndex);
+            // Update voice directly without retrigger to preserve manual override state
+            if (state.voiceManager?.isPadPlaying(state.activePadIndex)) {
+                state.voiceManager.setVoiceMotionMode(state.activePadIndex, mode);
+            } else {
+                // Only trigger if pad is not playing
+                triggerPad(state.activePadIndex);
+            }
         }
+        updateMotionLoopSelector();
 	});
+    
+    // Initialize option selector buttons
+    const motionLoopSelector = document.querySelector('.option-selector[data-selector="motion-loop"]');
+    if (motionLoopSelector) {
+        const prevBtn = motionLoopSelector.querySelector('[data-direction="prev"]') as HTMLElement;
+        const nextBtn = motionLoopSelector.querySelector('[data-direction="next"]') as HTMLElement;
+        
+        const changeMotionLoop = (direction: 'prev' | 'next') => {
+            if (!motionLoopSelect) return;
+            const currentIdx = motionLoopOptions.indexOf(motionLoopSelect.value);
+            let newIdx = direction === 'next' ? currentIdx + 1 : currentIdx - 1;
+            if (newIdx < 0) newIdx = motionLoopOptions.length - 1;
+            if (newIdx >= motionLoopOptions.length) newIdx = 0;
+            motionLoopSelect.value = motionLoopOptions[newIdx];
+            motionLoopSelect.dispatchEvent(new Event('change'));
+        };
+        
+        prevBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            changeMotionLoop('prev');
+        });
+        
+        nextBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            changeMotionLoop('next');
+        });
+        
+        // Initialize display
+        updateMotionLoopSelector();
+    }
+
+    // Motion Speed input handler
+    const motionSpeedInput = document.getElementById('motionSpeed') as HTMLInputElement;
+    motionSpeedInput?.addEventListener('input', () => {
+        const val = parseFloat(motionSpeedInput.value);
+        if (state.activePadIndex != null) {
+            const current = state.padParams.get(state.activePadIndex);
+            state.padParams.setMotionParams(state.activePadIndex, current.motionMode || 'loop', val);
+            // Update voice directly without retrigger to preserve manual override state
+            if (state.voiceManager?.isPadPlaying(state.activePadIndex)) {
+                state.voiceManager.setVoiceMotionSpeed(state.activePadIndex, val);
+            } else {
+                // Only trigger if pad is not playing
+                triggerPad(state.activePadIndex);
+            }
+        }
+        // Update knob visual
+        const knobEl = document.querySelector('.knob[data-knob="motion-speed"]') as HTMLElement | null;
+        const valEl = document.querySelector('.tile-value[data-val="motion-speed"]') as HTMLElement | null;
+        if (knobEl && valEl) {
+            const cfg = knobConfigs.find(k => k.id === 'motion-speed');
+            if (cfg) {
+                valEl.textContent = cfg.format(val);
+                updateKnobAngle(knobEl, val, cfg);
+                updateValueDisplay(cfg, val);
+            }
+        }
+    });
 
 	// Stop motion playback if user interacts with main XY pad
 	xyCanvas.addEventListener('pointerdown', () => {
@@ -486,6 +541,31 @@ function syncXYToPad(index: number, triggerChange = false) {
         const loopSelect = document.getElementById('motionLoopMode') as HTMLSelectElement;
         if (loopSelect) loopSelect.value = pad.motionMode ?? 'loop';
 	}
+	
+	// Sync XY Pad speeds from pad params
+	const normalSpeed = pad?.xySpeed ?? 0.15;
+	const shiftSpeed = pad?.xyShift ?? 0.05;
+	xy.setSpeed?.(normalSpeed, shiftSpeed);
+	
+	// Update knob visuals to reflect saved values
+	const xyspeedKnob = document.querySelector('.knob[data-knob="xyspeed"]') as HTMLElement | null;
+	const xyshiftKnob = document.querySelector('.knob[data-knob="xyshift"]') as HTMLElement | null;
+	if (xyspeedKnob) {
+		const cfg = knobConfigs.find(k => k.id === 'xyspeed');
+		if (cfg) {
+			updateKnobAngle(xyspeedKnob, normalSpeed, cfg);
+			const valEl = xyspeedKnob.closest('.param-tile')?.querySelector('.tile-value[data-val="xyspeed"]') as HTMLElement | null;
+			if (valEl) valEl.textContent = cfg.format(normalSpeed);
+		}
+	}
+	if (xyshiftKnob) {
+		const cfg = knobConfigs.find(k => k.id === 'xyshift');
+		if (cfg) {
+			updateKnobAngle(xyshiftKnob, shiftSpeed, cfg);
+			const valEl = xyshiftKnob.closest('.param-tile')?.querySelector('.tile-value[data-val="xyshift"]') as HTMLElement | null;
+			if (valEl) valEl.textContent = cfg.format(shiftSpeed);
+		}
+	}
 }
 // Flag to prevent saving selection to pad during XY morphing
 let isXYMorphing = false;
@@ -524,7 +604,11 @@ waveform.onSelection((sel) => {
 
 unlockBtn.addEventListener('click', async () => {
 	await state.contextMgr.unlock();
-	unlockBtn.textContent = 'Audio Unlocked';
+	// Update button fill visual
+	const fill = unlockBtn.querySelector('.knob-fill') as HTMLElement | null;
+	const valEl = unlockBtn.closest('.param-tile')?.querySelector('.tile-value:not([data-val])') as HTMLElement | null;
+	if (fill) fill.style.height = '100%';
+	if (valEl) valEl.textContent = '1';
 });
 
 // ---------- Audio/Video Recording ----------
@@ -537,15 +621,30 @@ function updateRecordingUI() {
 	recordBtn.disabled = isRecording;
 	recordVideoBtn.disabled = isRecording;
 	stopRecordBtn.disabled = !isRecording;
+	
+	// Update button fill visuals
+	const updateBtnFill = (btn: HTMLButtonElement, active: boolean) => {
+		const fill = btn.querySelector('.knob-fill') as HTMLElement | null;
+		const valEl = btn.closest('.param-tile')?.querySelector('.tile-value:not([data-val])') as HTMLElement | null;
+		if (fill) fill.style.height = active ? '100%' : '0%';
+		if (valEl) valEl.textContent = active ? '1' : '0';
+	};
+	
 	if (isRecording) {
 		const duration = state.recorder.getDuration();
 		const mins = Math.floor(duration / 60);
 		const secs = Math.floor(duration % 60);
 		const mode = isVideoRecording ? 'Video' : 'Audio';
-		recordStatusEl.textContent = `● Recording ${mode}: ${mins}:${secs.toString().padStart(2, '0')}`;
+		recordStatusEl.textContent = `● ${mode}: ${mins}:${secs.toString().padStart(2, '0')}`;
+		recordStatusEl.classList.add('active');
+		// Keep active button filled
+		updateBtnFill(isVideoRecording ? recordVideoBtn : recordBtn, true);
 	} else {
-		recordStatusEl.textContent = '';
+		recordStatusEl.textContent = 'Ready';
+		recordStatusEl.classList.remove('active');
 		isVideoRecording = false;
+		updateBtnFill(recordBtn, false);
+		updateBtnFill(recordVideoBtn, false);
 	}
 }
 
@@ -565,13 +664,19 @@ recordBtn.addEventListener('click', async () => {
 		await state.recorder.start(false); // Audio only
 		isVideoRecording = false;
 		updateRecordingUI();
+		// Update button fill visual
+		const fill = recordBtn.querySelector('.knob-fill') as HTMLElement | null;
+		const valEl = recordBtn.closest('.param-tile')?.querySelector('.tile-value:not([data-val])') as HTMLElement | null;
+		if (fill) fill.style.height = '100%';
+		if (valEl) valEl.textContent = '1';
 		// Update UI every second
 		state.recordingTimer = setInterval(() => {
 			updateRecordingUI();
 		}, 1000) as any as number;
 	} catch (error) {
-		console.error('Error starting recording:', error);
+		logger.error('Error starting recording:', error);
 		recordStatusEl.textContent = 'Error starting recording';
+		recordStatusEl.classList.remove('active');
 	}
 });
 
@@ -582,20 +687,26 @@ recordVideoBtn.addEventListener('click', async () => {
 		await state.recorder.start(true); // Video + Audio
 		isVideoRecording = true;
 		updateRecordingUI();
+		// Update button fill visual
+		const fill = recordVideoBtn.querySelector('.knob-fill') as HTMLElement | null;
+		const valEl = recordVideoBtn.closest('.param-tile')?.querySelector('.tile-value:not([data-val])') as HTMLElement | null;
+		if (fill) fill.style.height = '100%';
+		if (valEl) valEl.textContent = '1';
 		// Update UI every second
 		state.recordingTimer = setInterval(() => {
 			updateRecordingUI();
 		}, 1000) as any as number;
 	} catch (error) {
-		console.error('Error starting video recording:', error);
+		logger.error('Error starting video recording:', error);
 		if ((error as Error).message === 'PermissionDenied' || (error as any).name === 'NotAllowedError' || (error as any).name === 'AbortError') {
 			showPermissionHelp();
 			recordStatusEl.textContent = 'Permission denied';
 		} else {
 			recordStatusEl.textContent = 'Error starting video recording';
 		}
+		recordStatusEl.classList.remove('active');
 		setTimeout(() => {
-			recordStatusEl.textContent = '';
+			recordStatusEl.textContent = 'Ready';
 		}, 3000);
 	}
 });
@@ -608,6 +719,13 @@ stopRecordBtn.addEventListener('click', async () => {
 		state.recordingTimer = null;
 	}
 	updateRecordingUI();
+	// Update button fills - clear all recording buttons
+	[recordBtn, recordVideoBtn].forEach(btn => {
+		const fill = btn.querySelector('.knob-fill') as HTMLElement | null;
+		const valEl = btn.closest('.param-tile')?.querySelector('.tile-value:not([data-val])') as HTMLElement | null;
+		if (fill) fill.style.height = '0%';
+		if (valEl) valEl.textContent = '0';
+	});
 	if (blob) {
 		// Create download link
 		const url = URL.createObjectURL(blob);
@@ -643,8 +761,9 @@ stopRecordBtn.addEventListener('click', async () => {
 		document.body.removeChild(a);
 		URL.revokeObjectURL(url);
 		recordStatusEl.textContent = `✓ ${type} recording saved`;
+		recordStatusEl.classList.remove('active');
 		setTimeout(() => {
-			recordStatusEl.textContent = '';
+			recordStatusEl.textContent = 'Ready';
 		}, 3000);
 	}
 });
@@ -653,6 +772,21 @@ if (recallPerPadEl) {
 	recallPerPadEl.checked = true;
 	recallPerPadEl.addEventListener('change', () => {
 		state.recallPerPad = recallPerPadEl.checked;
+		// Update knob visual
+		const knobEl = document.querySelector('.knob[data-knob="recall"]') as HTMLElement | null;
+		const valEl = document.querySelector('.tile-value[data-val="recall"]') as HTMLElement | null;
+		if (knobEl && valEl) {
+			const cfg = knobConfigs.find(k => k.id === 'recall');
+			if (cfg) {
+				const value = state.recallPerPad ? 1 : 0;
+				valEl.textContent = cfg.format(value);
+				if (knobEl.classList.contains('toggle-switch-knob')) {
+					knobEl.classList.toggle('active', state.recallPerPad);
+				} else {
+					updateKnobAngle(knobEl, value, cfg);
+				}
+			}
+		}
 	});
 }
 
@@ -710,6 +844,11 @@ async function initMIDI(): Promise<boolean> {
 				const index = Number(mapping.targetId.split(':')[1]);
 				// Aggiorna lo stato attivo come se avessimo premuto il pad nella UI
 				const prevIndex = state.activePadIndex;
+				// Reset keyboard flag when switching pads
+				if (prevIndex !== index) {
+					xyUserUsingKeyboard = false;
+					arrowKeysPressed.clear();
+				}
 				state.activePadIndex = index;
 				snapshotBaseFromCurrentPad();
 
@@ -771,11 +910,26 @@ if (midiLearnEl) {
 		state.midi.learnEnabled = midiLearnEl.checked;
 		state.midi.pendingTarget = null;
 		highlightPending(null);
+		// Update knob visual
+		const knobEl = document.querySelector('.knob[data-knob="midi-learn"]') as HTMLElement | null;
+		const valEl = document.querySelector('.tile-value[data-val="midi-learn"]') as HTMLElement | null;
+		if (knobEl && valEl) {
+			const cfg = knobConfigs.find(k => k.id === 'midi-learn');
+			if (cfg) {
+				const value = state.midi.learnEnabled ? 1 : 0;
+				valEl.textContent = cfg.format(value);
+				if (knobEl.classList.contains('toggle-switch-knob')) {
+					knobEl.classList.toggle('active', state.midi.learnEnabled);
+				} else {
+					updateKnobAngle(knobEl, value, cfg);
+				}
+			}
+		}
 		// Lazy-init MIDI on first enable to ensure permission prompt is user-gestured
 		if (state.midi.learnEnabled && !state.midi.manager) {
 			const ok = await initMIDI();
 			if (!ok) {
-				console.warn('Web MIDI not available or permission not granted.');
+				logger.warn('Web MIDI not available or permission not granted.');
 				alert('Unable to enable MIDI. Check browser permission and try again (Chrome/Edge).');
 				midiLearnEl.checked = false;
 				state.midi.learnEnabled = false;
@@ -830,13 +984,25 @@ function setupNudgeButton(btn: HTMLButtonElement, direction: -1 | 1) {
 setupNudgeButton(nudgeLeftBtn, -1);
 setupNudgeButton(nudgeRightBtn, 1);
 
+// Zoom control handlers
+const zoomValueEl = document.getElementById('zoomValue') as HTMLElement;
+
+function updateZoomDisplay(val: number) {
+	if (zoomValueEl) {
+		zoomValueEl.textContent = `${val.toFixed(1)}x`;
+	}
+	if (waveform.setScale) {
+		waveform.setScale(val);
+	}
+}
+
 if (waveZoomInput) {
 	waveZoomInput.addEventListener('input', () => {
 		const val = parseFloat(waveZoomInput.value);
-		if (waveform.setScale) {
-			waveform.setScale(val);
-		}
+		updateZoomDisplay(val);
 	});
+	// Initialize zoom display
+	updateZoomDisplay(parseFloat(waveZoomInput.value));
 }
 
 function updateSelPosUI() {
@@ -868,24 +1034,36 @@ fileInput.addEventListener('change', async (e) => {
 
 	const fileNameEl = document.getElementById('fileName');
 	const resetStatus = (msg?: string) => {
-		if (fileNameEl) fileNameEl.textContent = msg ?? '';
+		if (fileNameEl) {
+			// Truncate long filenames
+			const displayText = msg ? (msg.length > 20 ? msg.substring(0, 17) + '...' : msg) : '';
+			fileNameEl.textContent = displayText;
+		}
+		// Update file button fill visual
+		const fileLabel = document.querySelector('label[for="fileInput"]') as HTMLElement | null;
+		if (fileLabel) {
+			const fill = fileLabel.querySelector('.knob-fill') as HTMLElement | null;
+			const valEl = fileLabel.closest('.param-tile')?.querySelector('.tile-value:not([data-val])') as HTMLElement | null;
+			if (fill) fill.style.height = file ? '100%' : '0%';
+			if (valEl) valEl.textContent = file ? '1' : '0';
+		}
 	};
 
 	try {
-		console.log('File selected:', file.name, file.type, `${(file.size / (1024 * 1024)).toFixed(1)} MB`);
+		logger.log('File selected:', file.name, file.type, `${(file.size / (1024 * 1024)).toFixed(1)} MB`);
 		resetStatus('Loading...');
 		await ensureAudioReady();
-		console.log('Audio context unlocked');
+		logger.log('Audio context unlocked');
 
 		const loaded = await loadAudioFile(state.contextMgr.audioContext, file);
-		console.log('Audio decoded:', loaded.audioBuffer.duration, 'seconds');
+		logger.log('Audio decoded:', loaded.audioBuffer.duration, 'seconds');
 		resetStatus(loaded.name);
 		
 		state.buffer = loaded.audioBuffer;
 		
-		console.log('Ensuring engine...');
+		logger.log('Ensuring engine...');
 		await ensureEngine(); // Now await this!
-		console.log('Engine ensured');
+		logger.log('Engine ensured');
 
 		ensureEffects();
 		// If no active pad, select the first one by default
@@ -906,17 +1084,17 @@ fileInput.addEventListener('change', async (e) => {
 		updateSelPosUI();
 		
 		if (state.voiceManager) {
-			console.log('Setting buffer to engine...');
+			logger.log('Setting buffer to engine...');
 			try {
 				await state.voiceManager.setBuffer(loaded.audioBuffer);
-				console.log('Buffer set to engine');
+				logger.log('Buffer set to engine');
 			} catch (err) {
-				console.error('Error setting buffer to engine:', err);
+				logger.error('Error setting buffer to engine:', err);
 				throw err;
 			}
 		}
 	} catch (error) {
-		console.error('Error loading audio file:', error);
+		logger.error('Error loading audio file:', error);
 		resetStatus('Error loading file');
 		alert(error instanceof Error ? error.message : 'Error loading audio file. See console for details.');
 	} finally {
@@ -940,7 +1118,7 @@ async function ensureEngine() {
 				await state.voiceManager.setBuffer(state.buffer);
 			}
 		} catch (err) {
-			console.error('VoiceManager error:', err);
+			logger.error('VoiceManager error:', err);
 			throw err;
 		}
 	}
@@ -1018,6 +1196,11 @@ function updatePadGrid() {
 			return;
 		}
 		const prevIndex = state.activePadIndex;
+		// Reset keyboard flag when switching pads
+		if (prevIndex !== index) {
+			xyUserUsingKeyboard = false;
+			arrowKeysPressed.clear();
+		}
 		state.activePadIndex = index;
 
 		// POLYPHONY: Do NOT stop other pads when switching focus.
@@ -1213,9 +1396,16 @@ async function triggerPad(index: number) {
 
 // ---------- VISUALIZATION LOOP ----------
 // Sync UI with Audio Engine state (Active Pad only)
+// Throttled to reduce CPU load when multiple pads are active
 function startVisualizationLoop() {
+    let lastUpdate = 0;
+    const UI_UPDATE_INTERVAL = 16; // ~60fps for UI (smooth visuals)
+    
     const loop = () => {
-        if (state.voiceManager) {
+        const now = performance.now();
+        const shouldUpdate = (now - lastUpdate) >= UI_UPDATE_INTERVAL;
+        
+        if (shouldUpdate && state.voiceManager) {
             // 1. Update Ghost Cursors (Background Polyphony)
             if (xy.setGhostPositions) {
                 const allPositions = state.voiceManager.getAllVoicePositions();
@@ -1241,11 +1431,14 @@ function startVisualizationLoop() {
                     }
                     
                     // Update Param Knobs / Visuals based on current position
+                    // Throttle visual updates to reduce DOM manipulation overhead
                     if (!xyUserDragging) {
                          updateVisualsFromXY(pos.x, pos.y);
                     }
                 }
             }
+            
+            lastUpdate = now;
         }
         requestAnimationFrame(loop);
     };
@@ -1292,18 +1485,39 @@ function updateVisualsFromXY(x: number, y: number) {
         selectionPos: xyBaseSelectionPos ?? 0
     };
 
-    const { granular: granularUpdate, effects: fxUpdate } = ParameterMapper.mapParams(
+    const { granular: granularUpdate, effects: fxUpdate, selectionPos: selectionPosUpdate } = ParameterMapper.mapParams(
         weights,
         baseParams,
         cornerMapping
     );
     
-    // 3. Update Knobs UI
+    // 3. Apply selectionPos to buffer if calculated
+    if (selectionPosUpdate !== undefined && state.buffer && state.voiceManager && state.activePadIndex != null) {
+        const region = state.regions.get(state.activePadIndex);
+        if (region) {
+            const width = region.end - region.start;
+            const movable = Math.max(0, state.buffer.duration - width);
+            if (movable > 0) {
+                const newStart = selectionPosUpdate * movable;
+                const newEnd = newStart + width;
+                // Clamp to buffer bounds
+                const clampedStart = Math.max(0, Math.min(newStart, state.buffer.duration - width));
+                const clampedEnd = Math.min(state.buffer.duration, clampedStart + width);
+                
+                const voice = state.voiceManager.getActiveVoiceForPad(state.activePadIndex);
+                if (voice) {
+                    voice.engine.setRegion(clampedStart, clampedEnd);
+                }
+            }
+        }
+    }
+    
+    // 4. Update Knobs UI
     controls.setGranularUI(granularUpdate);
     controls.setFxUI(fxUpdate);
     refreshParamTilesFromState(); // Updates the knobs rotation
     
-    // 4. Update XY Pad Visuals (Density, Color, Reverb)
+    // 5. Update XY Pad Visuals (Density, Color, Reverb)
     // We need to know "influence" for specific parameters for visual cues
     // Re-calculate basic influence locally just for these 3 specific visuals 
     // (Optimization: could expose influence map from Mapper if needed, but this is fast enough)
@@ -1631,6 +1845,20 @@ customSelectTL = createCustomSelect({
 	value: 'filterCutoffHz',
 	onChange: (value) => {
 		refreshXYCornerLabels();
+		// Update base snapshot when corner mapping changes to ensure interpolation works correctly
+		snapshotBaseFromCurrentPad();
+		// Update VoiceManager corner mapping if voice is active
+		if (state.activePadIndex != null && state.voiceManager) {
+			const voice = state.voiceManager.getActiveVoiceForPad(state.activePadIndex);
+			if (voice) {
+				voice.cornerMapping = {
+					tl: customSelectTL?.getValue() || '',
+					tr: customSelectTR?.getValue() || '',
+					bl: customSelectBL?.getValue() || '',
+					br: customSelectBR?.getValue() || ''
+				};
+			}
+		}
 	}
 });
 
@@ -1640,6 +1868,20 @@ customSelectTR = createCustomSelect({
 	value: 'density',
 	onChange: (value) => {
 		refreshXYCornerLabels();
+		// Update base snapshot when corner mapping changes to ensure interpolation works correctly
+		snapshotBaseFromCurrentPad();
+		// Update VoiceManager corner mapping if voice is active
+		if (state.activePadIndex != null && state.voiceManager) {
+			const voice = state.voiceManager.getActiveVoiceForPad(state.activePadIndex);
+			if (voice) {
+				voice.cornerMapping = {
+					tl: customSelectTL?.getValue() || '',
+					tr: customSelectTR?.getValue() || '',
+					bl: customSelectBL?.getValue() || '',
+					br: customSelectBR?.getValue() || ''
+				};
+			}
+		}
 	}
 });
 
@@ -1649,6 +1891,20 @@ customSelectBL = createCustomSelect({
 	value: 'reverbMix',
 	onChange: (value) => {
 		refreshXYCornerLabels();
+		// Update base snapshot when corner mapping changes to ensure interpolation works correctly
+		snapshotBaseFromCurrentPad();
+		// Update VoiceManager corner mapping if voice is active
+		if (state.activePadIndex != null && state.voiceManager) {
+			const voice = state.voiceManager.getActiveVoiceForPad(state.activePadIndex);
+			if (voice) {
+				voice.cornerMapping = {
+					tl: customSelectTL?.getValue() || '',
+					tr: customSelectTR?.getValue() || '',
+					bl: customSelectBL?.getValue() || '',
+					br: customSelectBR?.getValue() || ''
+				};
+			}
+		}
 	}
 });
 
@@ -1658,6 +1914,20 @@ customSelectBR = createCustomSelect({
 	value: 'pitchSemitones',
 	onChange: (value) => {
 		refreshXYCornerLabels();
+		// Update base snapshot when corner mapping changes to ensure interpolation works correctly
+		snapshotBaseFromCurrentPad();
+		// Update VoiceManager corner mapping if voice is active
+		if (state.activePadIndex != null && state.voiceManager) {
+			const voice = state.voiceManager.getActiveVoiceForPad(state.activePadIndex);
+			if (voice) {
+				voice.cornerMapping = {
+					tl: customSelectTL?.getValue() || '',
+					tr: customSelectTR?.getValue() || '',
+					bl: customSelectBL?.getValue() || '',
+					br: customSelectBR?.getValue() || ''
+				};
+			}
+		}
 	}
 });
 
@@ -1666,6 +1936,7 @@ let xyBaseFx: EffectsParams | null = null;
 let xyBaseSelectionPos: number | null = null; // 0..1 normalized along movable range
 // Track manual drag on XY pad to allow overriding motion automation safely
 let xyUserDragging = false;
+let xyUserUsingKeyboard = false;
 if (xyCanvas) {
 	xyCanvas.addEventListener('pointerdown', () => { xyUserDragging = true; });
 	const stopDrag = () => { xyUserDragging = false; };
@@ -1673,6 +1944,34 @@ if (xyCanvas) {
 	xyCanvas.addEventListener('pointerleave', stopDrag);
 	xyCanvas.addEventListener('pointercancel', stopDrag);
 }
+
+// Track keyboard arrow key usage for XY pad movement
+const arrowKeysPressed = new Set<string>();
+window.addEventListener('keydown', (ev) => {
+	if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight' || ev.key === 'ArrowUp' || ev.key === 'ArrowDown') {
+		arrowKeysPressed.add(ev.key);
+		// Only activate if XY pad is visible and we have an active pad
+		if (xyCanvas && state.activePadIndex != null) {
+			xyUserUsingKeyboard = true;
+		}
+	}
+});
+
+window.addEventListener('keyup', (ev) => {
+	if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight' || ev.key === 'ArrowUp' || ev.key === 'ArrowDown') {
+		arrowKeysPressed.delete(ev.key);
+		// Reset flag only when all arrow keys are released
+		if (arrowKeysPressed.size === 0) {
+			// Small delay to allow last onChange event to fire
+			setTimeout(() => {
+				xyUserUsingKeyboard = false;
+				if (state.activePadIndex != null) {
+					state.voiceManager?.setVoiceManualOverride(state.activePadIndex, false);
+				}
+			}, 50);
+		}
+	}
+});
 
 function refreshXYCornerLabels() {
 	const mode = getXYMode();
@@ -1766,7 +2065,7 @@ setXYMode('params');
 
 // ---------- Param tiles (knobs) ----------
 type KnobConfig = {
-	id: 'pitch' | 'density' | 'grain' | 'rand' | 'selpos' | 'filter' | 'res' | 'dtime' | 'dmix' | 'reverb' | 'gain' | 'xyspeed' | 'xyshift';
+	id: 'pitch' | 'density' | 'grain' | 'rand' | 'selpos' | 'filter' | 'res' | 'dtime' | 'dmix' | 'reverb' | 'gain' | 'xyspeed' | 'xyshift' | 'motion-speed' | 'motion-loop' | 'zoom' | 'nudge-step' | 'recall' | 'midi-learn';
 	min: number; max: number; step: number;
 	get: () => number;
 	set: (v: number) => void;
@@ -1778,6 +2077,107 @@ function updateActiveVoiceGranular(p: Partial<GranularParams>) {
     const voice = state.activePadIndex != null ? state.voiceManager?.getActiveVoiceForPad(state.activePadIndex) : null;
     if (voice) {
         voice.engine.setParams(p);
+    }
+}
+
+// Performance optimization: Throttled audio updates during knob dragging
+// This separates visual updates (immediate) from audio engine updates (throttled)
+let pendingAudioUpdates = new Map<string, { value: number; cfg: KnobConfig }>();
+let audioUpdateRaf: number | null = null;
+
+function scheduleAudioUpdate(cfgId: string, value: number, cfg: KnobConfig) {
+    pendingAudioUpdates.set(cfgId, { value, cfg });
+    
+    if (audioUpdateRaf === null) {
+        audioUpdateRaf = requestAnimationFrame(() => {
+            audioUpdateRaf = null;
+            // Apply all pending audio updates in a single batch
+            // Only update audio engine and state, skip UI (already updated)
+            pendingAudioUpdates.forEach(({ value, cfg }) => {
+                applyAudioUpdateOnly(cfg.id, value);
+            });
+            pendingAudioUpdates.clear();
+        });
+    }
+}
+
+function flushAudioUpdates() {
+    if (audioUpdateRaf !== null) {
+        cancelAnimationFrame(audioUpdateRaf);
+        audioUpdateRaf = null;
+    }
+    // Apply any remaining updates immediately
+    pendingAudioUpdates.forEach(({ value, cfg }) => {
+        applyAudioUpdateOnly(cfg.id, value);
+    });
+    pendingAudioUpdates.clear();
+}
+
+// Apply audio update without UI updates (UI is already updated during drag)
+function applyAudioUpdateOnly(cfgId: string, value: number) {
+    const cfg = knobConfigs.find(k => k.id === cfgId);
+    if (!cfg) return;
+    
+    // Apply value to state and audio engine only, skip UI updates
+    // This is a performance optimization to avoid redundant UI work during drag
+    switch (cfgId) {
+        case 'pitch':
+            const p1: any = { pitchSemitones: Math.round(value) };
+            updateActiveVoiceGranular(p1);
+            if (state.activePadIndex != null) state.padParams.setGranular(state.activePadIndex, p1);
+            break;
+        case 'density':
+            const p2: any = { density: Math.round(value) };
+            updateActiveVoiceGranular(p2);
+            if (state.activePadIndex != null) state.padParams.setGranular(state.activePadIndex, p2);
+            xy.setDensity?.(p2.density, 0);
+            break;
+        case 'grain':
+            const p3: any = { grainSizeMs: Math.round(value) };
+            updateActiveVoiceGranular(p3);
+            if (state.activePadIndex != null) state.padParams.setGranular(state.activePadIndex, p3);
+            break;
+        case 'rand':
+            const p4: any = { randomStartMs: Math.round(value) };
+            updateActiveVoiceGranular(p4);
+            if (state.activePadIndex != null) state.padParams.setGranular(state.activePadIndex, p4);
+            break;
+        case 'filter':
+            const fx1: any = { filterCutoffHz: Math.max(200, Math.round(value)) };
+            applyFxToEngine(fx1);
+            if (state.activePadIndex != null) state.padParams.setEffects(state.activePadIndex, fx1);
+            xy.setFilterCutoff?.(fx1.filterCutoffHz, 0);
+            break;
+        case 'res':
+            const fx2: any = { filterQ: Math.max(0, Math.min(20, value)) };
+            applyFxToEngine(fx2);
+            if (state.activePadIndex != null) state.padParams.setEffects(state.activePadIndex, fx2);
+            break;
+        case 'dtime':
+            const fx3: any = { delayTimeSec: Math.max(0, Math.min(1.2, value)) };
+            applyFxToEngine(fx3);
+            if (state.activePadIndex != null) state.padParams.setEffects(state.activePadIndex, fx3);
+            break;
+        case 'dmix':
+            const fx4: any = { delayMix: Math.max(0, Math.min(1, value)) };
+            applyFxToEngine(fx4);
+            if (state.activePadIndex != null) state.padParams.setEffects(state.activePadIndex, fx4);
+            break;
+        case 'reverb':
+            const fx5: any = { reverbMix: Math.max(0, Math.min(1, value)) };
+            applyFxToEngine(fx5);
+            if (state.activePadIndex != null) state.padParams.setEffects(state.activePadIndex, fx5);
+            xy.setReverbMix?.(value);
+            break;
+        case 'gain':
+            const fx6: any = { masterGain: Math.max(0, Math.min(1.5, value)) };
+            applyFxToEngine(fx6);
+            if (state.activePadIndex != null) state.padParams.setEffects(state.activePadIndex, fx6);
+            break;
+        default:
+            // For other params, use the normal set() method
+            cfg.set(value);
+            break;
     }
 }
 
@@ -1921,23 +2321,150 @@ const knobConfigs: KnobConfig[] = [
 	},
 	{
 		id: 'xyspeed', min: 0.01, max: 2.0, step: 0.01,
-		get: () => 0.15, // Default value, will be updated by knob
+		get: () => {
+			if (state.activePadIndex != null) {
+				return state.padParams.get(state.activePadIndex).xySpeed ?? 0.15;
+			}
+			return 0.15;
+		},
 		set: (v) => {
 			const normal = Math.max(0.01, Math.min(2.0, v));
 			const shift = knobConfigs.find(k => k.id === 'xyshift')?.get() ?? 0.05;
 			xy.setSpeed?.(normal, shift);
+			// Save to pad params
+			if (state.activePadIndex != null) {
+				const current = state.padParams.get(state.activePadIndex);
+				state.padParams.set(state.activePadIndex, { xySpeed: normal, xyShift: shift });
+			}
 		},
 		format: (v) => (Math.round(v * 100) / 100).toFixed(2)
 	},
 	{
 		id: 'xyshift', min: 0.01, max: 1.0, step: 0.01,
-		get: () => 0.05, // Default value, will be updated by knob
+		get: () => {
+			if (state.activePadIndex != null) {
+				return state.padParams.get(state.activePadIndex).xyShift ?? 0.05;
+			}
+			return 0.05;
+		},
 		set: (v) => {
 			const shift = Math.max(0.01, Math.min(1.0, v));
 			const normal = knobConfigs.find(k => k.id === 'xyspeed')?.get() ?? 0.15;
 			xy.setSpeed?.(normal, shift);
+			// Save to pad params
+			if (state.activePadIndex != null) {
+				const current = state.padParams.get(state.activePadIndex);
+				state.padParams.set(state.activePadIndex, { xySpeed: normal, xyShift: shift });
+			}
 		},
 		format: (v) => (Math.round(v * 100) / 100).toFixed(2)
+	},
+	{
+		id: 'motion-speed', min: 0.1, max: 4.0, step: 0.1,
+		get: () => {
+			const speedInput = document.getElementById('motionSpeed') as HTMLInputElement;
+			return speedInput ? parseFloat(speedInput.value) : 1.0;
+		},
+		set: (v) => {
+			const speedInput = document.getElementById('motionSpeed') as HTMLInputElement;
+			if (speedInput) speedInput.value = String(Math.max(0.1, Math.min(4.0, v)));
+			if (state.activePadIndex != null) {
+				const current = state.padParams.get(state.activePadIndex);
+				state.padParams.setMotionParams(state.activePadIndex, current.motionMode || 'loop', v);
+				// Update voice directly without retrigger to preserve manual override state
+				if (state.voiceManager?.isPadPlaying(state.activePadIndex)) {
+					state.voiceManager.setVoiceMotionSpeed(state.activePadIndex, v);
+				} else {
+					// Only trigger if pad is not playing
+					triggerPad(state.activePadIndex);
+				}
+			}
+		},
+		format: (v) => (Math.round(v * 10) / 10).toFixed(1)
+	},
+	{
+		id: 'motion-loop', min: 0, max: 3, step: 1,
+		get: () => {
+			const loopSelect = document.getElementById('motionLoopMode') as HTMLSelectElement;
+			if (!loopSelect) return 0;
+			const modes = ['loop', 'pingpong', 'oneshot', 'reverse'];
+			return modes.indexOf(loopSelect.value);
+		},
+		set: (v) => {
+			const loopSelect = document.getElementById('motionLoopMode') as HTMLSelectElement;
+			if (!loopSelect) return;
+			const modes = ['loop', 'pingpong', 'oneshot', 'reverse'];
+			const idx = Math.max(0, Math.min(3, Math.round(v)));
+			loopSelect.value = modes[idx];
+			if (state.activePadIndex != null) {
+				const current = state.padParams.get(state.activePadIndex);
+				state.padParams.setMotionParams(state.activePadIndex, modes[idx] as any, current.motionSpeed || 1.0);
+				// Update voice directly without retrigger to preserve manual override state
+				if (state.voiceManager?.isPadPlaying(state.activePadIndex)) {
+					state.voiceManager.setVoiceMotionMode(state.activePadIndex, modes[idx] as any);
+				} else {
+					// Only trigger if pad is not playing
+					triggerPad(state.activePadIndex);
+				}
+			}
+			// Update option selector visual
+			const selectorEl = document.querySelector('.option-selector[data-selector="motion-loop"]') as HTMLElement | null;
+			const labelEl = selectorEl?.querySelector('.option-selector-label[data-label="motion-loop"]') as HTMLElement | null;
+			if (labelEl) {
+				const labels = ['Loop', 'PingPong', 'OneShot', 'Reverse'];
+				labelEl.textContent = labels[idx];
+			}
+		},
+		format: (v) => {
+			const modes = ['Loop', 'PingPong', 'OneShot', 'Reverse'];
+			return modes[Math.max(0, Math.min(3, Math.round(v)))];
+		}
+	},
+	{
+		id: 'zoom', min: 0.1, max: 5.0, step: 0.1,
+		get: () => {
+			const waveZoomInput = document.getElementById('waveZoom') as HTMLInputElement;
+			return waveZoomInput ? parseFloat(waveZoomInput.value) : 1.0;
+		},
+		set: (v) => {
+			const clamped = Math.max(0.1, Math.min(5.0, v));
+			updateZoomDisplay(clamped);
+		},
+		format: (v) => (Math.round(v * 10) / 10).toFixed(1)
+	},
+	{
+		id: 'nudge-step', min: 1, max: 1000, step: 1,
+		get: () => {
+			const nudgeStepInput = document.getElementById('nudgeStepMs') as HTMLInputElement;
+			return nudgeStepInput ? parseInt(nudgeStepInput.value) : 20;
+		},
+		set: (v) => {
+			const nudgeStepInput = document.getElementById('nudgeStepMs') as HTMLInputElement;
+			if (nudgeStepInput) nudgeStepInput.value = String(Math.max(1, Math.min(1000, Math.round(v))));
+		},
+		format: (v) => String(Math.round(v))
+	},
+	{
+		id: 'recall', min: 0, max: 1, step: 1,
+		get: () => state.recallPerPad ? 1 : 0,
+		set: (v) => {
+			state.recallPerPad = v >= 0.5;
+			const recallPerPadEl = document.getElementById('recallPerPad') as HTMLInputElement;
+			if (recallPerPadEl) recallPerPadEl.checked = state.recallPerPad;
+		},
+		format: (v) => v >= 0.5 ? 'ON' : 'OFF'
+	},
+	{
+		id: 'midi-learn', min: 0, max: 1, step: 1,
+		get: () => state.midi.learnEnabled ? 1 : 0,
+		set: (v) => {
+			const midiLearnEl = document.getElementById('midiLearn') as HTMLInputElement;
+			if (midiLearnEl) {
+				midiLearnEl.checked = v >= 0.5;
+				state.midi.learnEnabled = v >= 0.5;
+			}
+		},
+		format: (v) => v >= 0.5 ? 'ON' : 'OFF'
 	}
 ];
 
@@ -1956,52 +2483,125 @@ function initParamTiles() {
 		let current = cfg.get();
 		valEl.textContent = cfg.format(current);
 		updateKnobAngle(knobEl, current, cfg);
-		let dragging = false;
-		let startY = 0;
-		let startVal = current;
-		const onDown = (ev: PointerEvent) => {
-			dragging = true;
-			// If MIDI learn is enabled, set this knob as target immediately
-			if (state.midi.learnEnabled) {
-				state.midi.pendingTarget = `knob:${cfg.id}`;
-				highlightPending(state.midi.pendingTarget);
-			}
-			startY = ev.clientY;
-			startVal = current;
-			(knobEl as any).setPointerCapture?.(ev.pointerId);
-		};
-		const onMove = (ev: PointerEvent) => {
-			if (!dragging) return;
-			const dy = startY - ev.clientY; // upward increases value
-			const range = cfg.max - cfg.min;
-			const delta = (dy / 120) * range * 0.1; // sensitivity
-			let next = startVal + delta;
-			if (next < cfg.min) next = cfg.min;
-			if (next > cfg.max) next = cfg.max;
-			current = next;
-			valEl.textContent = cfg.format(current);
-			updateKnobAngle(knobEl, current, cfg);
-			cfg.set(current);
-		};
-		const onUp = (ev: PointerEvent) => {
-			dragging = false;
-			(knobEl as any).releasePointerCapture?.(ev.pointerId);
-		};
-		knobEl.addEventListener('pointerdown', onDown);
-		window.addEventListener('pointermove', onMove);
-		window.addEventListener('pointerup', onUp);
+		
+		// Check if this is a toggle switch (on/off control)
+		const isToggle = knobEl.classList.contains('toggle-switch-knob');
+		
+		if (isToggle) {
+			// Toggle switch: click to toggle, no drag
+			const updateToggleState = () => {
+				current = cfg.get();
+				const isActive = current >= (cfg.max + cfg.min) / 2;
+				knobEl.classList.toggle('active', isActive);
+				valEl.textContent = cfg.format(current);
+			};
+			updateToggleState();
+			
+			knobEl.addEventListener('click', (e) => {
+				e.stopPropagation();
+				// If MIDI learn is enabled, set this knob as target immediately
+				if (state.midi.learnEnabled) {
+					state.midi.pendingTarget = `knob:${cfg.id}`;
+					highlightPending(state.midi.pendingTarget);
+					return;
+				}
+				// Toggle the value
+				current = cfg.get();
+				const newValue = current >= (cfg.max + cfg.min) / 2 ? cfg.min : cfg.max;
+				cfg.set(newValue);
+				updateToggleState();
+				updateValueDisplay(cfg, newValue);
+			});
+		} else {
+			// Regular knob: drag to adjust
+			let dragging = false;
+			let startY = 0;
+			let startVal = current;
+			const onDown = (ev: PointerEvent) => {
+				dragging = true;
+				// If MIDI learn is enabled, set this knob as target immediately
+				if (state.midi.learnEnabled) {
+					state.midi.pendingTarget = `knob:${cfg.id}`;
+					highlightPending(state.midi.pendingTarget);
+				}
+				startY = ev.clientY;
+				startVal = current;
+				updateValueDisplay(cfg, current);
+				(knobEl as any).setPointerCapture?.(ev.pointerId);
+			};
+			const onMove = (ev: PointerEvent) => {
+				if (!dragging) return;
+				const dy = startY - ev.clientY; // upward increases value
+				const range = cfg.max - cfg.min;
+				const delta = (dy / 120) * range * 0.1; // sensitivity
+				let next = startVal + delta;
+				if (next < cfg.min) next = cfg.min;
+				if (next > cfg.max) next = cfg.max;
+				current = next;
+				// Update UI immediately for responsive feel
+				valEl.textContent = cfg.format(current);
+				updateKnobAngle(knobEl, current, cfg);
+				updateValueDisplay(cfg, current);
+				// Schedule audio update with throttling (batched via requestAnimationFrame)
+				scheduleAudioUpdate(cfg.id, current, cfg);
+			};
+			const onUp = (ev: PointerEvent) => {
+				dragging = false;
+				// Flush any pending audio updates immediately when drag ends
+				flushAudioUpdates();
+				(knobEl as any).releasePointerCapture?.(ev.pointerId);
+			};
+			knobEl.addEventListener('pointerdown', onDown);
+			window.addEventListener('pointermove', onMove);
+			window.addEventListener('pointerup', onUp);
+		}
 	});
 }
 
+// Performance optimization: Batch DOM updates for knob fill
+let pendingKnobUpdates = new Map<HTMLElement, number>();
+let knobUpdateRaf: number | null = null;
+
 function updateKnobAngle(knobEl: HTMLElement, value: number, cfg: KnobConfig) {
 	const norm = (value - cfg.min) / (cfg.max - cfg.min); // 0..1
-	const angle = -135 + norm * 270; // sweep
-	const dot = knobEl.querySelector('.knob-dot') as HTMLElement | null;
-	if (dot) {
-		const rect = knobEl.getBoundingClientRect();
-		const radius = Math.max(0, Math.min(rect.width, rect.height) / 2 - 10); // 10px padding from edge
-		dot.style.transform = `translate(-50%, -50%) rotate(${angle}deg) translateX(${radius}px)`;
+	// Get or create fill element
+	let fill = knobEl.querySelector('.knob-fill') as HTMLElement | null;
+	if (!fill) {
+		fill = document.createElement('div');
+		fill.className = 'knob-fill';
+		knobEl.appendChild(fill);
 	}
+	
+	// Batch DOM updates via requestAnimationFrame for better performance
+	pendingKnobUpdates.set(fill, norm * 100);
+	
+	if (knobUpdateRaf === null) {
+		knobUpdateRaf = requestAnimationFrame(() => {
+			knobUpdateRaf = null;
+			// Apply all pending knob updates in a single batch
+			pendingKnobUpdates.forEach((height, fillEl) => {
+				fillEl.style.height = `${height}%`;
+			});
+			pendingKnobUpdates.clear();
+		});
+	}
+}
+
+// Unified value display box functions
+function updateValueDisplay(cfg: KnobConfig, value: number) {
+	const box = document.getElementById('valueDisplayBox');
+	const labelEl = box?.querySelector('.value-display-label') as HTMLElement | null;
+	const valueEl = box?.querySelector('.value-display-value') as HTMLElement | null;
+	
+	if (!box || !labelEl || !valueEl) return;
+	
+	const tileEl = document.querySelector(`.param-tile[data-tile="${cfg.id}"]`) as HTMLElement | null;
+	const headerEl = tileEl?.querySelector('.tile-header') as HTMLElement | null;
+	const label = headerEl?.textContent || cfg.id.toUpperCase();
+	const formattedValue = cfg.format(value);
+	
+	labelEl.textContent = label;
+	valueEl.textContent = formattedValue;
 }
 
 function refreshParamTilesFromState() {
@@ -2011,19 +2611,247 @@ function refreshParamTilesFromState() {
 		if (!knobEl || !valEl) return;
 		const v = cfg.get();
 		valEl.textContent = cfg.format(v);
-		updateKnobAngle(knobEl, v, cfg);
+		
+		// Update toggle switch state if applicable
+		if (knobEl.classList.contains('toggle-switch-knob')) {
+			const isActive = v >= (cfg.max + cfg.min) / 2;
+			knobEl.classList.toggle('active', isActive);
+		} else {
+			updateKnobAngle(knobEl, v, cfg);
+		}
+	});
+	// Also refresh new knob types
+	const newKnobIds: Array<'motion-speed' | 'zoom' | 'nudge-step' | 'recall' | 'midi-learn'> = [
+		'motion-speed', 'zoom', 'nudge-step', 'recall', 'midi-learn'
+	];
+	newKnobIds.forEach(id => {
+		const cfg = knobConfigs.find(k => k.id === id);
+		if (!cfg) return;
+		const knobEl = document.querySelector(`.knob[data-knob="${id}"]`) as HTMLElement | null;
+		const valEl = document.querySelector(`.tile-value[data-val="${id}"]`) as HTMLElement | null;
+		if (!knobEl || !valEl) return;
+		const v = cfg.get();
+		valEl.textContent = cfg.format(v);
+		
+		// Update toggle switch state if applicable
+		if (knobEl.classList.contains('toggle-switch-knob')) {
+			const isActive = v >= (cfg.max + cfg.min) / 2;
+			knobEl.classList.toggle('active', isActive);
+		} else {
+			updateKnobAngle(knobEl, v, cfg);
+		}
 	});
 }
 
 initParamTiles();
-// Initialize XY Pad speeds
-xy.setSpeed?.(0.15, 0.05);
-// Sincronizza il valore iniziale del riverbero, filtro cutoff e densità
+
+// Initialize all new knob types (ones not handled by initParamTiles)
+function initAllKnobs() {
+	// Initialize new knob types that aren't in the main knobConfigs loop
+	const newKnobIds: Array<'motion-speed' | 'zoom' | 'nudge-step' | 'recall' | 'midi-learn'> = [
+		'motion-speed', 'zoom', 'nudge-step', 'recall', 'midi-learn'
+	];
+	
+	newKnobIds.forEach(id => {
+		const cfg = knobConfigs.find(k => k.id === id);
+		if (!cfg) return;
+		const knobEl = document.querySelector(`.knob[data-knob="${id}"]`) as HTMLElement | null;
+		const valEl = document.querySelector(`.tile-value[data-val="${id}"]`) as HTMLElement | null;
+		if (!knobEl || !valEl) return;
+		
+		// Skip if already initialized (check for existing listener)
+		if ((knobEl as any).__knobInitialized) return;
+		(knobEl as any).__knobInitialized = true;
+		
+		let current = cfg.get();
+		valEl.textContent = cfg.format(current);
+		
+		// Check if this is a toggle switch
+		const isToggle = knobEl.classList.contains('toggle-switch-knob');
+		
+		if (isToggle) {
+			// Toggle switch: click to toggle, no drag
+			const updateToggleState = () => {
+				current = cfg.get();
+				const isActive = current >= (cfg.max + cfg.min) / 2;
+				knobEl.classList.toggle('active', isActive);
+				valEl.textContent = cfg.format(current);
+			};
+			updateToggleState();
+			
+			knobEl.addEventListener('click', (e) => {
+				e.stopPropagation();
+				current = cfg.get();
+				const newValue = current >= (cfg.max + cfg.min) / 2 ? cfg.min : cfg.max;
+				cfg.set(newValue);
+				updateToggleState();
+				updateValueDisplay(cfg, newValue);
+			});
+		} else {
+			// Regular knob: drag to adjust
+			updateKnobAngle(knobEl, current, cfg);
+			
+			let dragging = false;
+			let startY = 0;
+			let startVal = current;
+			let currentPointerId: number | null = null;
+			const onDown = (ev: PointerEvent) => {
+				dragging = true;
+				startY = ev.clientY;
+				startVal = current;
+				currentPointerId = ev.pointerId;
+				updateValueDisplay(cfg, current);
+				(knobEl as any).setPointerCapture?.(ev.pointerId);
+			};
+			const onMove = (ev: PointerEvent) => {
+				if (!dragging) return;
+				const dy = startY - ev.clientY;
+				const range = cfg.max - cfg.min;
+				const delta = (dy / 120) * range * 0.1;
+				let next = startVal + delta;
+				if (next < cfg.min) next = cfg.min;
+				if (next > cfg.max) next = cfg.max;
+				current = next;
+				// Update UI immediately for responsive feel
+				valEl.textContent = cfg.format(current);
+				updateKnobAngle(knobEl, current, cfg);
+				updateValueDisplay(cfg, current);
+				// Schedule audio update with throttling (batched via requestAnimationFrame)
+				scheduleAudioUpdate(cfg.id, current, cfg);
+			};
+			const onUp = (ev: PointerEvent) => {
+				if (!dragging) return;
+				dragging = false;
+				// Flush any pending audio updates immediately when drag ends
+				flushAudioUpdates();
+				if (currentPointerId !== null) {
+					(knobEl as any).releasePointerCapture?.(currentPointerId);
+					currentPointerId = null;
+				}
+			};
+			knobEl.addEventListener('pointerdown', onDown);
+			window.addEventListener('pointermove', onMove);
+			window.addEventListener('pointerup', onUp);
+		}
+	});
+}
+
+// Initialize button knobs (draw, play, clear, nudge, midi clear, file, recording, theme)
+function initButtonKnobs() {
+	// Motion buttons
+	const motionRecordBtn = document.getElementById('motionRecordBtn') as HTMLButtonElement;
+	const motionPlayBtn = document.getElementById('motionPlayBtn') as HTMLButtonElement;
+	const motionClearBtn = document.getElementById('motionClearBtn') as HTMLButtonElement;
+	const midiClearBtn = document.getElementById('midiClear') as HTMLButtonElement;
+	const nudgeLeftBtn = document.getElementById('nudgeLeft') as HTMLButtonElement;
+	const nudgeRightBtn = document.getElementById('nudgeRight') as HTMLButtonElement;
+	const fileLabel = document.querySelector('label[for="fileInput"]') as HTMLElement | null;
+	const stopRecordBtn = document.getElementById('stopRecordBtn') as HTMLButtonElement;
+
+	function updateButtonFill(btn: HTMLButtonElement, isActive: boolean) {
+		const fill = btn.querySelector('.knob-fill') as HTMLElement | null;
+		if (fill) {
+			fill.style.height = isActive ? '100%' : '0%';
+		}
+		const valEl = btn.closest('.param-tile')?.querySelector('.tile-value:not([data-val])') as HTMLElement | null;
+		if (valEl) {
+			valEl.textContent = isActive ? '1' : '0';
+		}
+	}
+
+	if (motionRecordBtn) {
+		motionRecordBtn.addEventListener('click', () => {
+			updateButtonFill(motionRecordBtn, true);
+			setTimeout(() => updateButtonFill(motionRecordBtn, false), 200);
+		});
+	}
+	if (motionPlayBtn) {
+		// Sync button fill with motion panel play state
+		const syncPlayButton = () => {
+			if (motionCtrl) {
+				const isPlaying = motionCtrl.isPlaying();
+				const fill = motionPlayBtn.querySelector('.knob-fill') as HTMLElement | null;
+				const valEl = motionPlayBtn.closest('.param-tile')?.querySelector('.tile-value:not([data-val])') as HTMLElement | null;
+				if (fill) fill.style.height = isPlaying ? '100%' : '0%';
+				if (valEl) valEl.textContent = isPlaying ? '1' : '0';
+			}
+		};
+		// Sync on click
+		motionPlayBtn.addEventListener('click', () => {
+			setTimeout(syncPlayButton, 50); // Small delay to let motionCtrl update
+		});
+		// Periodic sync (in case state changes externally)
+		setInterval(syncPlayButton, 200);
+	}
+	if (motionClearBtn) {
+		motionClearBtn.addEventListener('click', () => {
+			updateButtonFill(motionClearBtn, true);
+			setTimeout(() => updateButtonFill(motionClearBtn, false), 200);
+		});
+	}
+	if (midiClearBtn) {
+		midiClearBtn.addEventListener('click', () => {
+			updateButtonFill(midiClearBtn, true);
+			setTimeout(() => updateButtonFill(midiClearBtn, false), 200);
+		});
+	}
+	if (nudgeLeftBtn) {
+		nudgeLeftBtn.addEventListener('mousedown', () => updateButtonFill(nudgeLeftBtn, true));
+		nudgeLeftBtn.addEventListener('mouseup', () => updateButtonFill(nudgeLeftBtn, false));
+		nudgeLeftBtn.addEventListener('mouseleave', () => updateButtonFill(nudgeLeftBtn, false));
+	}
+	if (nudgeRightBtn) {
+		nudgeRightBtn.addEventListener('mousedown', () => updateButtonFill(nudgeRightBtn, true));
+		nudgeRightBtn.addEventListener('mouseup', () => updateButtonFill(nudgeRightBtn, false));
+		nudgeRightBtn.addEventListener('mouseleave', () => updateButtonFill(nudgeRightBtn, false));
+	}
+	if (fileLabel) {
+		fileLabel.addEventListener('click', () => {
+			updateButtonFill(fileLabel as any, true);
+			setTimeout(() => updateButtonFill(fileLabel as any, false), 200);
+		});
+	}
+	if (stopRecordBtn) {
+		stopRecordBtn.addEventListener('click', () => {
+			updateButtonFill(stopRecordBtn, true);
+			setTimeout(() => updateButtonFill(stopRecordBtn, false), 200);
+		});
+	}
+	// Theme button fill is handled in theme toggle handler above
+	// Set initial theme button state
+	if (themeToggleBtn) {
+		const initialTheme = themeManager.getTheme();
+		const fill = themeToggleBtn.querySelector('.knob-fill') as HTMLElement | null;
+		const valEl = themeToggleBtn.closest('.param-tile')?.querySelector('.tile-value:not([data-val])') as HTMLElement | null;
+		if (fill) fill.style.height = initialTheme === 'dark' ? '100%' : '0%';
+		if (valEl) valEl.textContent = initialTheme === 'dark' ? '1' : '0';
+	}
+}
+
+initAllKnobs();
+initButtonKnobs();
+
+// Initialize value display box with default
+const box = document.getElementById('valueDisplayBox');
+const labelEl = box?.querySelector('.value-display-label') as HTMLElement | null;
+const valueEl = box?.querySelector('.value-display-value') as HTMLElement | null;
+if (labelEl && valueEl) {
+	labelEl.textContent = '—';
+	valueEl.textContent = '—';
+}
+
+// Initialize XY Pad speeds from active pad (if any) or use defaults
 if (state.activePadIndex != null) {
 	const pad = state.padParams.get(state.activePadIndex);
+	const normalSpeed = pad?.xySpeed ?? 0.15;
+	const shiftSpeed = pad?.xyShift ?? 0.05;
+	xy.setSpeed?.(normalSpeed, shiftSpeed);
 	xy.setReverbMix?.(pad.effects.reverbMix);
 	xy.setFilterCutoff?.(pad.effects.filterCutoffHz, 0);
 	xy.setDensity?.(pad.granular.density, 0);
+} else {
+	// Use defaults if no pad is active
+	xy.setSpeed?.(0.15, 0.05);
 }
 	function snapshotBaseFromCurrentPad() {
 		// snapshot current pad parameters as base
@@ -2064,10 +2892,10 @@ if (state.activePadIndex != null) {
         // MANUAL OVERRIDE LOGIC
 		if (state.activePadIndex != null) {
             // 1. Tell Audio Engine we are manually overriding position
-            // This ensures audio reacts immediately to dragging
-            // CRITICAL FIX: Only trigger override if USER is actually dragging.
+            // This ensures audio reacts immediately to dragging or keyboard movement
+            // CRITICAL FIX: Only trigger override if USER is actually dragging or using keyboard.
             // Programmatic updates (like syncXYToPad) should NOT lock the voice.
-            if (xyUserDragging) {
+            if (xyUserDragging || xyUserUsingKeyboard) {
                 state.voiceManager?.setVoiceManualOverride(state.activePadIndex, true, pos.x, pos.y);
             }
             
@@ -2090,11 +2918,14 @@ if (state.activePadIndex != null) {
         // and VoiceManager internal loop handles the Audio params (via setVoiceManualOverride).
     });
 
-    // Reset override when drag ends
+    // Reset override when drag ends or keyboard stops
     if (xyCanvas) {
         const resetOverride = () => {
             if (state.activePadIndex != null) {
-                state.voiceManager?.setVoiceManualOverride(state.activePadIndex, false);
+                // Only reset if not using keyboard
+                if (!xyUserUsingKeyboard) {
+                    state.voiceManager?.setVoiceManualOverride(state.activePadIndex, false);
+                }
             }
             xyUserDragging = false;
         };
@@ -2102,13 +2933,19 @@ if (state.activePadIndex != null) {
         xyCanvas.addEventListener('pointerleave', resetOverride);
         xyCanvas.addEventListener('pointercancel', resetOverride);
     }
+    
+    // Reset override when keyboard stops (handled in keyup listener above)
 
 // ---------- Update Manager (Electron only) ----------
 const updateManager = createUpdateManager();
 
+// ---------- Beta Expiration Manager (Electron only) ----------
+const betaExpirationManager = createBetaExpirationManager();
+betaExpirationManager.init();
+
 // Show notification when update is available
 updateManager.onUpdateAvailable((info) => {
-	console.log('Update available:', info.version);
+	logger.log('Update available:', info.version);
 	// You can show a notification to the user here
 	if (recordStatusEl) {
 		recordStatusEl.textContent = `Update available: v${info.version}`;
@@ -2128,7 +2965,7 @@ updateManager.onDownloadProgress((progress) => {
 
 // Notify when update is downloaded (will auto-install on next restart)
 updateManager.onUpdateDownloaded((info) => {
-	console.log('Update downloaded:', info.version);
+	logger.log('Update downloaded:', info.version);
 	if (recordStatusEl) {
 		recordStatusEl.textContent = `Update downloaded! Restart to install v${info.version}`;
 		setTimeout(() => {
@@ -2136,3 +2973,9 @@ updateManager.onUpdateDownloaded((info) => {
 		}, 10000);
 	}
 });
+
+// Initialize tooltips for all interactive elements
+// Wait for DOM to be fully loaded
+setTimeout(() => {
+	initAllTooltips('button, .knob, [data-tooltip], [title]', { delay: 1500 });
+}, 100);

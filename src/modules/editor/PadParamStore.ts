@@ -16,6 +16,8 @@ export type PadParams = {
 	motionPath?: MotionPoint[];
     motionMode?: MotionMode;
     motionSpeed?: number;
+    xySpeed?: number; // Speed for keyboard arrow movement (normal)
+    xyShift?: number; // Speed for keyboard arrow movement with Shift key
 };
 
 export function defaultGranular(): GranularParams {
@@ -37,7 +39,9 @@ export function createPadParamStore(size: number) {
 		effects: defaultEffects(),
 		xy: { x: 0.5, y: 0.5 },
         motionMode: 'loop',
-        motionSpeed: 1.0
+        motionSpeed: 1.0,
+        xySpeed: 0.15, // Default normal speed
+        xyShift: 0.05  // Default shift speed
 	}));
 
 	function get(index: number): PadParams {
@@ -51,7 +55,9 @@ export function createPadParamStore(size: number) {
 			xy: params.xy ? { ...params.xy } : current.xy,
 			motionPath: params.motionPath !== undefined ? params.motionPath : current.motionPath,
             motionMode: params.motionMode !== undefined ? params.motionMode : current.motionMode,
-            motionSpeed: params.motionSpeed !== undefined ? params.motionSpeed : current.motionSpeed
+            motionSpeed: params.motionSpeed !== undefined ? params.motionSpeed : current.motionSpeed,
+            xySpeed: params.xySpeed !== undefined ? params.xySpeed : (current.xySpeed ?? 0.15),
+            xyShift: params.xyShift !== undefined ? params.xyShift : (current.xyShift ?? 0.05)
 		};
 	}
 	function setGranular(index: number, granular: Partial<GranularParams>) {
@@ -75,7 +81,9 @@ export function createPadParamStore(size: number) {
 			effects: defaultEffects(),
 			xy: { x: 0.5, y: 0.5 },
             motionMode: 'loop',
-            motionSpeed: 1.0
+            motionSpeed: 1.0,
+            xySpeed: 0.15,
+            xyShift: 0.05
 		});
 	}
 	function remove(index: number) {

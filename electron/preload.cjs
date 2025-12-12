@@ -19,6 +19,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('update-downloaded', (event, info) => callback(info));
   },
   
+  // Beta expiration events (soft expiration - warnings only)
+  onBetaExpirationWarning: (callback) => {
+    ipcRenderer.on('beta-expiration-warning', (event, info) => callback(info));
+  },
+  onBetaExpirationInfo: (callback) => {
+    ipcRenderer.on('beta-expiration-info', (event, info) => callback(info));
+  },
+  
   // Platform info
   platform: process.platform,
   isElectron: true,

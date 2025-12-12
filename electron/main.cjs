@@ -94,6 +94,11 @@ function createWindow() {
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
     
+    // Check for beta expiration (soft expiration - warning only)
+    if (!isDev && (process.env.BETA === 'true' || app.getVersion().includes('beta'))) {
+      checkBetaExpiration();
+    }
+    
     // Focus window
     if (isDev) {
       mainWindow.focus();
@@ -104,6 +109,33 @@ function createWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+  
+  // Soft expiration check for beta versions (warning only, doesn't block)
+  function checkBetaExpiration() {
+    // Use build date or app creation time as start date
+    const betaStartDate = app.getCreationTime ? new Date(app.getCreationTime()) : new Date();
+    const expirationDays = parseInt(process.env.BETA_EXPIRATION_DAYS || '90', 10); // Default 90 days
+    const expirationDate = new Date(betaStartDate.getTime() + expirationDays * 24 * 60 * 60 * 1000);
+    const daysRemaining = Math.ceil((expirationDate.getTime() - Date.now()) / (24 * 60 * 60 * 1000));
+    
+    if (daysRemaining <= 30 && daysRemaining > 0) {
+      // Show warning if less than 30 days remaining
+      if (mainWindow) {
+        mainWindow.webContents.send('beta-expiration-warning', {
+          daysRemaining,
+          expirationDate: expirationDate.toISOString()
+        });
+      }
+    } else if (daysRemaining <= 0) {
+      // Show info if expired (but don't block)
+      if (mainWindow) {
+        mainWindow.webContents.send('beta-expiration-info', {
+          daysRemaining: 0,
+          expirationDate: expirationDate.toISOString()
+        });
+      }
+    }
+  }
 
   // Handle external links
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -161,6 +193,12 @@ app.on('window-all-closed', () => {
 
 // Auto-updater configuration
 if (!isDev) {
+  // Check if this is a beta version (version contains 'beta' or channel is set)
+  const isBeta = process.env.BETA === 'true' || app.getVersion().includes('beta');
+  if (isBeta) {
+    autoUpdater.channel = 'beta';
+  }
+  
   autoUpdater.checkForUpdatesAndNotify();
 
   // Check for updates every hour

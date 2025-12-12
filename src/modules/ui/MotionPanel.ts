@@ -2,7 +2,7 @@
 export interface MotionPanelConfig {
 	canvas: HTMLCanvasElement;
 	cursor: HTMLElement;
-	recordBtn: HTMLButtonElement;
+	recordBtn?: HTMLButtonElement; // Optional - drawing can be done by dragging on canvas
 	playBtn: HTMLButtonElement;
 	clearBtn: HTMLButtonElement;
 	loopModeSelect: HTMLSelectElement;
@@ -90,8 +90,10 @@ export function createMotionPanel(config: MotionPanelConfig) {
 		isRecording = true;
 		path = [];
 		startTime = performance.now();
-		recordBtn.textContent = 'Recording...';
-		recordBtn.classList.add('active');
+		if (recordBtn) {
+			recordBtn.textContent = 'Recording...';
+			recordBtn.classList.add('active');
+		}
 		canvas.setPointerCapture(e.pointerId);
 		addPoint(e);
 	}
@@ -116,8 +118,10 @@ export function createMotionPanel(config: MotionPanelConfig) {
 	function stopRecording(e: PointerEvent) {
 		if (!isRecording) return;
 		isRecording = false;
-		recordBtn.textContent = 'Draw';
-		recordBtn.classList.remove('active');
+		if (recordBtn) {
+			recordBtn.textContent = 'Draw';
+			recordBtn.classList.remove('active');
+		}
 		canvas.releasePointerCapture(e.pointerId);
 		// Optimize path if needed?
 		if (config.onPathChange) config.onPathChange(path);
@@ -227,13 +231,15 @@ export function createMotionPanel(config: MotionPanelConfig) {
 	}
 
 	// Controls
-	recordBtn.addEventListener('click', () => {
-		// Just visual feedback or toggle? 
-		// If we draw by dragging, this button might just be a clear indicator
-		// Or maybe it toggles "Record Mode" where dragging records, otherwise dragging just moves cursor?
-		// For simplicity: Dragging on canvas ALWAYS records a new path.
-		// The button can just focus/highlight.
-	});
+	if (recordBtn) {
+		recordBtn.addEventListener('click', () => {
+			// Just visual feedback or toggle? 
+			// If we draw by dragging, this button might just be a clear indicator
+			// Or maybe it toggles "Record Mode" where dragging records, otherwise dragging just moves cursor?
+			// For simplicity: Dragging on canvas ALWAYS records a new path.
+			// The button can just focus/highlight.
+		});
+	}
 
 	playBtn.addEventListener('click', () => {
 		if (isPlaying) stopPlayback();
