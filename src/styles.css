@@ -1437,9 +1437,9 @@ h1, h2 { margin: 0 0 8px 0; font-weight: 600; }
   gap: 4px;
 }
 
-/* File - 3 columns (has 3 buttons: FILE, UNLOCK, CLEAR) */
+/* File - 2 columns (has 2 buttons: FILE, CLEAR) */
 .grid-item-file .param-grid {
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 4px;
 }
 
@@ -1577,6 +1577,196 @@ h1, h2 { margin: 0 0 8px 0; font-weight: 600; }
   min-height: 75px;
   max-height: 75px;
   aspect-ratio: auto;
+}
+
+.param-tile-file-load,
+.param-tile-clear {
+  min-height: 90px !important;
+  max-height: 90px !important;
+}
+
+/* File button - make it stand out as starting point */
+.param-tile-file-load {
+  position: relative;
+}
+
+.param-tile-clear {
+  position: relative;
+}
+
+.knob-file-main {
+  width: 64px !important;
+  height: 64px !important;
+  background: linear-gradient(135deg, rgba(255, 183, 77, 0.25), rgba(255, 183, 77, 0.15)) !important;
+  border: 2px solid rgba(255, 183, 77, 0.5) !important;
+  box-shadow: 
+    0 0 0 2px rgba(255, 183, 77, 0.3),
+    0 0 20px rgba(255, 183, 77, 0.4),
+    5px 5px 10px rgba(0, 0, 0, 0.15),
+    -5px -5px 10px rgba(255, 255, 255, 0.9),
+    inset 0 0 0 rgba(0, 0, 0, 0) !important;
+  animation: fileButtonGlow 3s ease-in-out infinite;
+  position: relative;
+}
+
+.knob-file-main:not(.file-loaded) .knob-plus {
+  animation: fileButtonIconMove 2s ease-in-out infinite;
+}
+
+[data-theme="dark"] .knob-file-main {
+  background: linear-gradient(135deg, rgba(255, 183, 77, 0.3), rgba(255, 183, 77, 0.2)) !important;
+  border: 2px solid rgba(255, 183, 77, 0.6) !important;
+  box-shadow: 
+    0 0 0 2px rgba(255, 183, 77, 0.4),
+    0 0 25px rgba(255, 183, 77, 0.5),
+    5px 5px 10px rgba(0, 0, 0, 0.6),
+    -5px -5px 10px rgba(255, 255, 255, 0.03),
+    inset 0 0 0 rgba(0, 0, 0, 0) !important;
+  animation: fileButtonGlowDark 3s ease-in-out infinite;
+}
+
+.knob-file-main:hover {
+  transform: translateY(-2px) scale(1.05) !important;
+  box-shadow: 
+    0 0 0 3px rgba(255, 183, 77, 0.5),
+    0 0 30px rgba(255, 183, 77, 0.6),
+    7px 7px 14px rgba(0, 0, 0, 0.18),
+    -7px -7px 14px rgba(255, 255, 255, 0.95),
+    inset 0 0 0 rgba(0, 0, 0, 0) !important;
+  transition: all 0.2s ease !important;
+}
+
+[data-theme="dark"] .knob-file-main:hover {
+  box-shadow: 
+    0 0 0 3px rgba(255, 183, 77, 0.6),
+    0 0 35px rgba(255, 183, 77, 0.7),
+    7px 7px 14px rgba(0, 0, 0, 0.7),
+    -7px -7px 14px rgba(255, 255, 255, 0.05),
+    inset 0 0 0 rgba(0, 0, 0, 0) !important;
+}
+
+.knob-file-main .knob-plus {
+  font-size: 24px !important;
+  opacity: 0.9 !important;
+}
+
+/* File loading spinner */
+.file-loading-spinner {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  border: 3px solid rgba(255, 183, 77, 0.2);
+  border-top-color: rgba(255, 183, 77, 0.9);
+  border-radius: 50%;
+  animation: fileSpinnerRotate 0.8s linear infinite;
+}
+
+[data-theme="dark"] .file-loading-spinner {
+  border-color: rgba(255, 183, 77, 0.3);
+  border-top-color: rgba(255, 183, 77, 1);
+}
+
+@keyframes fileSpinnerRotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Clear button - same size as file button */
+.knob-clear-main {
+  width: 64px !important;
+  height: 64px !important;
+  background: linear-gradient(135deg, rgba(158, 158, 158, 0.25), rgba(158, 158, 158, 0.15)) !important;
+  border: 2px solid rgba(158, 158, 158, 0.5) !important;
+  box-shadow: 
+    0 0 0 2px rgba(158, 158, 158, 0.3),
+    5px 5px 10px rgba(0, 0, 0, 0.15),
+    -5px -5px 10px rgba(255, 255, 255, 0.9),
+    inset 0 0 0 rgba(0, 0, 0, 0) !important;
+}
+
+[data-theme="dark"] .knob-clear-main {
+  background: linear-gradient(135deg, rgba(158, 158, 158, 0.3), rgba(158, 158, 158, 0.2)) !important;
+  border: 2px solid rgba(158, 158, 158, 0.6) !important;
+  box-shadow: 
+    0 0 0 2px rgba(158, 158, 158, 0.4),
+    5px 5px 10px rgba(0, 0, 0, 0.6),
+    -5px -5px 10px rgba(255, 255, 255, 0.03),
+    inset 0 0 0 rgba(0, 0, 0, 0) !important;
+}
+
+.knob-clear-main:hover {
+  transform: translateY(-2px) scale(1.05) !important;
+  box-shadow: 
+    0 0 0 3px rgba(158, 158, 158, 0.5),
+    7px 7px 14px rgba(0, 0, 0, 0.18),
+    -7px -7px 14px rgba(255, 255, 255, 0.95),
+    inset 0 0 0 rgba(0, 0, 0, 0) !important;
+  transition: all 0.2s ease !important;
+}
+
+[data-theme="dark"] .knob-clear-main:hover {
+  box-shadow: 
+    0 0 0 3px rgba(158, 158, 158, 0.6),
+    7px 7px 14px rgba(0, 0, 0, 0.7),
+    -7px -7px 14px rgba(255, 255, 255, 0.05),
+    inset 0 0 0 rgba(0, 0, 0, 0) !important;
+}
+
+.knob-clear-main .knob-plus {
+  font-size: 24px !important;
+  opacity: 0.9 !important;
+}
+
+/* Glow animation for file button - more elegant and appropriate for upload */
+@keyframes fileButtonGlow {
+  0%, 100% {
+    box-shadow: 
+      0 0 0 2px rgba(255, 183, 77, 0.3),
+      0 0 15px rgba(255, 183, 77, 0.3),
+      5px 5px 10px rgba(0, 0, 0, 0.15),
+      -5px -5px 10px rgba(255, 255, 255, 0.9),
+      inset 0 0 0 rgba(0, 0, 0, 0);
+  }
+  50% {
+    box-shadow: 
+      0 0 0 2px rgba(255, 183, 77, 0.4),
+      0 0 25px rgba(255, 183, 77, 0.5),
+      5px 5px 10px rgba(0, 0, 0, 0.15),
+      -5px -5px 10px rgba(255, 255, 255, 0.9),
+      inset 0 0 0 rgba(0, 0, 0, 0);
+  }
+}
+
+@keyframes fileButtonGlowDark {
+  0%, 100% {
+    box-shadow: 
+      0 0 0 2px rgba(255, 183, 77, 0.4),
+      0 0 20px rgba(255, 183, 77, 0.4),
+      5px 5px 10px rgba(0, 0, 0, 0.6),
+      -5px -5px 10px rgba(255, 255, 255, 0.03),
+      inset 0 0 0 rgba(0, 0, 0, 0);
+  }
+  50% {
+    box-shadow: 
+      0 0 0 2px rgba(255, 183, 77, 0.5),
+      0 0 30px rgba(255, 183, 77, 0.6),
+      5px 5px 10px rgba(0, 0, 0, 0.6),
+      -5px -5px 10px rgba(255, 255, 255, 0.03),
+      inset 0 0 0 rgba(0, 0, 0, 0);
+  }
+}
+
+/* Icon movement animation - subtle upward movement suggesting upload */
+@keyframes fileButtonIconMove {
+  0%, 100% {
+    transform: translateY(0);
+    opacity: 0.9;
+  }
+  50% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
 }
 
 .grid-item-nudge .param-tile {
@@ -2170,17 +2360,6 @@ h1, h2 { margin: 0 0 8px 0; font-weight: 600; }
 }
 .grid-item-file .param-tile[data-tile="file-load"] .tile-header::before {
   content: '◉';
-  width: auto;
-  height: auto;
-  font-size: 10px;
-  opacity: 0.8;
-}
-
-.grid-item-file .param-tile[data-tile="unlock"] .tile-header {
-  color: var(--color-file);
-}
-.grid-item-file .param-tile[data-tile="unlock"] .tile-header::before {
-  content: '○';
   width: auto;
   height: auto;
   font-size: 10px;
@@ -3180,8 +3359,7 @@ hr { border: none; border-top: 1px solid var(--hr-color); margin: 14px 0; }
 }
 
 .grid-item-file .knob-fill {
-  background: linear-gradient(to top, var(--color-file), var(--color-file));
-  opacity: 0.6;
+  display: none !important;
 }
 
 .grid-item-recording .knob-fill {

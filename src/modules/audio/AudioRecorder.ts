@@ -26,8 +26,12 @@ export function createAudioRecorder(
 	let videoTrackEndedHandler: (() => void) | null = null; // Store handler reference for cleanup
 	
 	function pickMimeType(): string | null {
-		// Prefer explicit audio+video codecs; fall back to generic webm
+		// Prefer MP4 formats first, then fall back to WebM
 		const candidates = [
+			'video/mp4;codecs=h264,aac',
+			'video/mp4;codecs=avc1,mp4a',
+			'video/mp4;codecs=h264',
+			'video/mp4',
 			'video/webm;codecs=vp9,opus',
 			'video/webm;codecs=vp8,opus',
 			'video/webm;codecs=vp9',
@@ -52,7 +56,7 @@ export function createAudioRecorder(
 				logger.warn('[Recorder] Failed with mime', mime, err);
 			}
 		}
-		// Fallback: let browser pick
+		// Fallback: try webm, then let browser pick
 		const fallbackMime = 'video/webm';
 		try {
 			const rec = new MediaRecorder(stream, { mimeType: fallbackMime });
@@ -215,12 +219,15 @@ export function createAudioRecorder(
 
 				// Log support
 				logger.log('[Recorder] MIME support', {
+					'video/mp4;codecs=h264,aac': MediaRecorder.isTypeSupported('video/mp4;codecs=h264,aac'),
+					'video/mp4;codecs=avc1,mp4a': MediaRecorder.isTypeSupported('video/mp4;codecs=avc1,mp4a'),
+					'video/mp4;codecs=h264': MediaRecorder.isTypeSupported('video/mp4;codecs=h264'),
+					'video/mp4': MediaRecorder.isTypeSupported('video/mp4'),
 					'video/webm;codecs=vp9,opus': MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus'),
 					'video/webm;codecs=vp8,opus': MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus'),
 					'video/webm;codecs=vp9': MediaRecorder.isTypeSupported('video/webm;codecs=vp9'),
 					'video/webm;codecs=vp8': MediaRecorder.isTypeSupported('video/webm;codecs=vp8'),
-					'video/webm': MediaRecorder.isTypeSupported('video/webm'),
-					'video/mp4': MediaRecorder.isTypeSupported('video/mp4')
+					'video/webm': MediaRecorder.isTypeSupported('video/webm')
 				});
 
 				let created = false;

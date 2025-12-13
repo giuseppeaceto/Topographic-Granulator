@@ -277,20 +277,19 @@
           <!-- File Controls -->
           <div class="grid-item grid-item-file">
             <div class="param-grid">
-              <div class="param-tile" data-tile="file-load">
+              <div class="param-tile param-tile-file-load" data-tile="file-load">
                 <div class="tile-header">FILE</div>
-                <label for="fileInput" class="knob" data-tooltip="Load audio file (WAV, MP3, etc.)" style="cursor: pointer; display: flex; align-items: center; justify-content: center;"><div class="knob-fill" style="height: 0%;"></div><span class="knob-plus">+</span></label>
+                <label for="fileInput" class="knob knob-file-main" data-tooltip="Load audio file (WAV, MP3, etc.) - START HERE" style="cursor: pointer; display: flex; align-items: center; justify-content: center;">
+                  <div class="knob-fill" style="height: 0%; display: none;"></div>
+                  <span class="knob-plus">⬆</span>
+                  <div class="file-loading-spinner" style="display: none;"></div>
+                </label>
                 <input id="fileInput" type="file" accept="audio/*" class="visually-hidden" />
                 <div class="tile-value">0</div>
               </div>
-              <div class="param-tile" data-tile="unlock">
-                <div class="tile-header">UNLOCK</div>
-                <button id="unlockBtn" class="knob" title="Unlock AudioContext" style="cursor: pointer;"><div class="knob-fill" style="height: 0%;"></div><span class="knob-plus">+</span></button>
-                <div class="tile-value">0</div>
-              </div>
-              <div class="param-tile" data-tile="clear-selection">
+              <div class="param-tile param-tile-clear" data-tile="clear-selection">
                 <div class="tile-header">CLEAR</div>
-                <button id="clearSelectionBtn" class="knob" title="Clear selection" style="cursor: pointer;"><div class="knob-fill" style="height: 0%;"></div><span class="knob-plus">✕</span></button>
+                <button id="clearSelectionBtn" class="knob knob-clear-main" title="Clear selection" style="cursor: pointer;"><div class="knob-fill" style="height: 0%;"></div><span class="knob-plus">✕</span></button>
                 <div class="tile-value">0</div>
               </div>
             </div>

@@ -57,7 +57,6 @@ const state: AppState = {
 };
 
 const fileInput = document.getElementById('fileInput') as HTMLInputElement;
-const unlockBtn = document.getElementById('unlockBtn') as HTMLButtonElement;
 const padGridEl = document.getElementById('padGrid') as HTMLDivElement;
 const waveformCanvas = document.getElementById('waveform') as HTMLCanvasElement;
 const selStartEl = document.getElementById('selStart') as HTMLElement;
@@ -602,15 +601,6 @@ waveform.onSelection((sel) => {
 	}
 });
 
-unlockBtn.addEventListener('click', async () => {
-	await state.contextMgr.unlock();
-	// Update button fill visual
-	const fill = unlockBtn.querySelector('.knob-fill') as HTMLElement | null;
-	const valEl = unlockBtn.closest('.param-tile')?.querySelector('.tile-value:not([data-val])') as HTMLElement | null;
-	if (fill) fill.style.height = '100%';
-	if (valEl) valEl.textContent = '1';
-});
-
 // ---------- Audio/Video Recording ----------
 
 let isVideoRecording = false;
@@ -1033,25 +1023,34 @@ fileInput.addEventListener('change', async (e) => {
 	if (!file) return;
 
 	const fileNameEl = document.getElementById('fileName');
+	const fileLabel = document.querySelector('label[for="fileInput"]') as HTMLElement | null;
+	const loadingSpinner = fileLabel?.querySelector('.file-loading-spinner') as HTMLElement | null;
+	const knobPlus = fileLabel?.querySelector('.knob-plus') as HTMLElement | null;
+	
+	const setLoadingState = (loading: boolean) => {
+		if (loadingSpinner) loadingSpinner.style.display = loading ? 'block' : 'none';
+		if (knobPlus) knobPlus.style.display = loading ? 'none' : 'block';
+		if (fileLabel) {
+			fileLabel.style.pointerEvents = loading ? 'none' : 'auto';
+			fileLabel.style.opacity = loading ? '0.7' : '1';
+		}
+	};
+	
 	const resetStatus = (msg?: string) => {
 		if (fileNameEl) {
 			// Truncate long filenames
 			const displayText = msg ? (msg.length > 20 ? msg.substring(0, 17) + '...' : msg) : '';
 			fileNameEl.textContent = displayText;
 		}
-		// Update file button fill visual
-		const fileLabel = document.querySelector('label[for="fileInput"]') as HTMLElement | null;
-		if (fileLabel) {
-			const fill = fileLabel.querySelector('.knob-fill') as HTMLElement | null;
-			const valEl = fileLabel.closest('.param-tile')?.querySelector('.tile-value:not([data-val])') as HTMLElement | null;
-			if (fill) fill.style.height = file ? '100%' : '0%';
-			if (valEl) valEl.textContent = file ? '1' : '0';
-		}
+		const valEl = fileLabel?.closest('.param-tile')?.querySelector('.tile-value:not([data-val])') as HTMLElement | null;
+		if (valEl) valEl.textContent = file ? '1' : '0';
 	};
 
 	try {
 		logger.log('File selected:', file.name, file.type, `${(file.size / (1024 * 1024)).toFixed(1)} MB`);
+		setLoadingState(true);
 		resetStatus('Loading...');
+		
 		await ensureAudioReady();
 		logger.log('Audio context unlocked');
 
@@ -1060,6 +1059,11 @@ fileInput.addEventListener('change', async (e) => {
 		resetStatus(loaded.name);
 		
 		state.buffer = loaded.audioBuffer;
+		
+		// Disable icon animation when file is loaded
+		if (fileLabel) {
+			fileLabel.classList.add('file-loaded');
+		}
 		
 		logger.log('Ensuring engine...');
 		await ensureEngine(); // Now await this!
@@ -1097,7 +1101,12 @@ fileInput.addEventListener('change', async (e) => {
 		logger.error('Error loading audio file:', error);
 		resetStatus('Error loading file');
 		alert(error instanceof Error ? error.message : 'Error loading audio file. See console for details.');
+		// Re-enable animation on error (no file loaded)
+		if (fileLabel) {
+			fileLabel.classList.remove('file-loaded');
+		}
 	} finally {
+		setLoadingState(false);
 		// keep the input reset so re-selecting the same file works
 		(e.target as HTMLInputElement).value = '';
 	}
