@@ -34,9 +34,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onUpdateNotAvailable: (callback) => {
     ipcRenderer.on('update-not-available', (event, info) => callback(info));
   },
+  onUpdateError: (callback) => {
+    ipcRenderer.on('update-error', (event, error) => callback(error));
+  },
   
   // Platform info
   platform: process.platform,
   isElectron: true,
+  
+  // App version
+  getVersion: () => ipcRenderer.invoke('get-app-version'),
 });
 

@@ -115,6 +115,23 @@ themeIcon.innerHTML = initialTheme === 'dark'
 	: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" fill="currentColor"/></svg>';
 updateLogo(initialTheme);
 
+// Update app version from Electron (if available)
+const appVersionEl = document.querySelector('.app-version') as HTMLElement | null;
+if (appVersionEl) {
+	const isElectron = typeof window !== 'undefined' && (window as any).electronAPI;
+	if (isElectron && (window as any).electronAPI?.getVersion) {
+		(window as any).electronAPI.getVersion().then((version: string) => {
+			if (version) {
+				appVersionEl.textContent = `v${version}`;
+			}
+		}).catch((err: any) => {
+			console.warn('Failed to get app version:', err);
+			// Keep default version if it fails
+		});
+	}
+	// If not Electron or getVersion fails, keep the default version from HTML
+}
+
 // Theme toggle handler
 if (themeToggleBtn && themeIcon) {
 	themeToggleBtn.addEventListener('click', () => {
@@ -2984,6 +3001,41 @@ if (updateManager.onUpdateNotAvailable) {
 				recordStatusEl.textContent = '';
 			}, 3000);
 		}
+	});
+}
+
+// Show error if update check fails
+if (updateManager.onUpdateError) {
+	updateManager.onUpdateError((error) => {
+		// Extract error details
+		const errorMessage = error?.message || error?.toString() || 'Errore sconosciuto';
+		const errorCode = error?.code || error?.errno || '';
+		const errorStack = error?.stack || '';
+		
+		logger.error('Update check error:', {
+			message: errorMessage,
+			code: errorCode,
+			stack: errorStack,
+			fullError: error
+		});
+		
+		// Show user-friendly error message
+		let userMessage = 'Errore verifica aggiornamenti: ';
+		if (errorCode) {
+			userMessage += `${errorMessage} (codice: ${errorCode})`;
+		} else {
+			userMessage += errorMessage;
+		}
+		
+		if (recordStatusEl) {
+			recordStatusEl.textContent = userMessage;
+			setTimeout(() => {
+				recordStatusEl.textContent = '';
+			}, 8000);
+		}
+		
+		// Also log to console with full details
+		console.error('[Update Manager] Full error details:', error);
 	});
 }
 

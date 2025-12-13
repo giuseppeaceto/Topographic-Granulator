@@ -214,8 +214,15 @@ function checkForUpdatesManually() {
 if (!isDev) {
   // Check if this is a beta version (version contains 'beta' or channel is set)
   const isBeta = process.env.BETA === 'true' || app.getVersion().includes('beta');
+  const currentVersion = app.getVersion();
+  console.log(`[Auto-updater] Current app version: ${currentVersion}`);
+  console.log(`[Auto-updater] Is beta: ${isBeta}`);
+  
   if (isBeta) {
     autoUpdater.channel = 'beta';
+    console.log('[Auto-updater] Channel set to: beta');
+  } else {
+    console.log('[Auto-updater] Channel: default (stable releases)');
   }
   
   autoUpdater.checkForUpdatesAndNotify();
@@ -227,7 +234,7 @@ if (!isDev) {
 
   // Auto-updater events
   autoUpdater.on('checking-for-update', () => {
-    console.log('Checking for update...');
+    console.log('[Auto-updater] Checking for update...');
   });
 
   autoUpdater.on('update-available', (info) => {
@@ -239,7 +246,7 @@ if (!isDev) {
   });
 
   autoUpdater.on('update-not-available', (info) => {
-    console.log('Update not available:', info.version);
+    console.log('[Auto-updater] Update not available. Current version:', info.version || currentVersion);
     // Notify user that they have the latest version
     if (mainWindow) {
       mainWindow.webContents.send('update-not-available', info);
@@ -247,7 +254,23 @@ if (!isDev) {
   });
 
   autoUpdater.on('error', (err) => {
-    console.error('Error in auto-updater:', err);
+    console.error('[Auto-updater] Error:', err);
+    console.error('[Auto-updater] Error details:', {
+      message: err?.message,
+      code: err?.code,
+      errno: err?.errno,
+      stack: err?.stack,
+      fullError: err
+    });
+    // Show error to user for debugging
+    if (mainWindow) {
+      mainWindow.webContents.send('update-error', {
+        message: err?.message || String(err),
+        code: err?.code || err?.errno,
+        stack: err?.stack,
+        fullError: err
+      });
+    }
   });
 
   autoUpdater.on('download-progress', (progressObj) => {
@@ -405,6 +428,10 @@ ipcMain.handle('get-desktop-sources', async (event) => {
     name: s.name,
     thumbnail: s.thumbnail.toDataURL()
   }));
+});
+
+ipcMain.handle('get-app-version', async (event) => {
+  return app.getVersion();
 });
 
 // Handle app protocol for deep linking (optional)

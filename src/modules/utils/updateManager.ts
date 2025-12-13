@@ -52,6 +52,12 @@ export function createUpdateManager() {
     }
   }
 
+  function onUpdateError(callback: (error: any) => void) {
+    if (electronAPI?.onUpdateError) {
+      electronAPI.onUpdateError(callback);
+    }
+  }
+
   return {
     checkForUpdates,
     onUpdateAvailable,
@@ -59,6 +65,7 @@ export function createUpdateManager() {
     onUpdateDownloaded,
     onCheckingForUpdateManual,
     onUpdateNotAvailable,
+    onUpdateError,
   };
 }
 
