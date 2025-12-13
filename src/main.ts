@@ -2943,17 +2943,40 @@ const updateManager = createUpdateManager();
 const betaExpirationManager = createBetaExpirationManager();
 betaExpirationManager.init();
 
+// Show notification when checking for updates manually
+if (updateManager.onCheckingForUpdateManual) {
+	updateManager.onCheckingForUpdateManual(() => {
+		logger.log('Checking for updates...');
+		if (recordStatusEl) {
+			recordStatusEl.textContent = 'Verifica aggiornamenti in corso...';
+		}
+	});
+}
+
 // Show notification when update is available
 updateManager.onUpdateAvailable((info) => {
 	logger.log('Update available:', info.version);
 	// You can show a notification to the user here
 	if (recordStatusEl) {
-		recordStatusEl.textContent = `Update available: v${info.version}`;
+		recordStatusEl.textContent = `Aggiornamento disponibile: v${info.version}`;
 		setTimeout(() => {
 			recordStatusEl.textContent = '';
-		}, 5000);
+		}, 8000);
 	}
 });
+
+// Show notification when no update is available
+if (updateManager.onUpdateNotAvailable) {
+	updateManager.onUpdateNotAvailable((info) => {
+		logger.log('No update available:', info.version);
+		if (recordStatusEl) {
+			recordStatusEl.textContent = 'Hai già la versione più recente';
+			setTimeout(() => {
+				recordStatusEl.textContent = '';
+			}, 3000);
+		}
+	});
+}
 
 // Show download progress
 updateManager.onDownloadProgress((progress) => {

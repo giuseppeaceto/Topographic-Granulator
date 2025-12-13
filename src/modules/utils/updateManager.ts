@@ -40,11 +40,25 @@ export function createUpdateManager() {
     }
   }
 
+  function onCheckingForUpdateManual(callback: () => void) {
+    if (electronAPI?.onCheckingForUpdateManual) {
+      electronAPI.onCheckingForUpdateManual(callback);
+    }
+  }
+
+  function onUpdateNotAvailable(callback: (info: any) => void) {
+    if (electronAPI?.onUpdateNotAvailable) {
+      electronAPI.onUpdateNotAvailable(callback);
+    }
+  }
+
   return {
     checkForUpdates,
     onUpdateAvailable,
     onDownloadProgress,
     onUpdateDownloaded,
+    onCheckingForUpdateManual,
+    onUpdateNotAvailable,
   };
 }
 

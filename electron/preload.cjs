@@ -27,6 +27,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('beta-expiration-info', (event, info) => callback(info));
   },
   
+  // Manual update check events
+  onCheckingForUpdateManual: (callback) => {
+    ipcRenderer.on('checking-for-update-manual', (event) => callback());
+  },
+  onUpdateNotAvailable: (callback) => {
+    ipcRenderer.on('update-not-available', (event, info) => callback(info));
+  },
+  
   // Platform info
   platform: process.platform,
   isElectron: true,

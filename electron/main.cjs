@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, session, desktopCapturer, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, session, desktopCapturer, screen, Menu } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
@@ -146,6 +146,9 @@ function createWindow() {
 
 // This method will be called when Electron has finished initialization
 app.whenReady().then(() => {
+  // Create application menu
+  createMenu();
+  
   // Handle getDisplayMedia requests (required for video recording)
   // This is crucial even if we use getDesktopSources + getUserMedia, because
   // if that fails, we fallback to getDisplayMedia, which needs this handler to work in Electron.
@@ -174,6 +177,11 @@ app.whenReady().then(() => {
   });
 
   createWindow();
+  
+  // Recreate menu when window is created (in case it's recreated)
+  app.on('browser-window-created', () => {
+    createMenu();
+  });
 
   app.on('activate', () => {
     // On macOS, re-create window when dock icon is clicked
@@ -190,6 +198,17 @@ app.on('window-all-closed', () => {
     app.quit();
   }
 });
+
+// Function to manually check for updates
+function checkForUpdatesManually() {
+  if (!isDev) {
+    autoUpdater.checkForUpdatesAndNotify();
+    // Show feedback to user
+    if (mainWindow) {
+      mainWindow.webContents.send('checking-for-update-manual');
+    }
+  }
+}
 
 // Auto-updater configuration
 if (!isDev) {
@@ -221,6 +240,10 @@ if (!isDev) {
 
   autoUpdater.on('update-not-available', (info) => {
     console.log('Update not available:', info.version);
+    // Notify user that they have the latest version
+    if (mainWindow) {
+      mainWindow.webContents.send('update-not-available', info);
+    }
   });
 
   autoUpdater.on('error', (err) => {
@@ -242,6 +265,123 @@ if (!isDev) {
     autoUpdater.quitAndInstall(false, true);
   });
 }
+
+// Create application menu
+function createMenu() {
+  const template = [];
+
+  // macOS: App menu (first menu)
+  if (process.platform === 'darwin') {
+    template.push({
+      label: app.getName(),
+      submenu: [
+        { role: 'about', label: `Informazioni su ${app.getName()}` },
+        { type: 'separator' },
+        {
+          label: 'Verifica aggiornamenti...',
+          click: () => checkForUpdatesManually(),
+          enabled: !isDev
+        },
+        { type: 'separator' },
+        { role: 'services', label: 'Servizi' },
+        { type: 'separator' },
+        { role: 'hide', label: 'Nascondi ' + app.getName() },
+        { role: 'hideothers', label: 'Nascondi altre' },
+        { role: 'unhide', label: 'Mostra tutto' },
+        { type: 'separator' },
+        { role: 'quit', label: 'Esci da ' + app.getName() }
+      ]
+    });
+  }
+
+  // File menu
+  template.push({
+    label: 'File',
+    submenu: [
+      { role: 'close', label: 'Chiudi finestra' }
+    ]
+  });
+
+  // Edit menu
+  template.push({
+    label: 'Modifica',
+    submenu: [
+      { role: 'undo', label: 'Annulla' },
+      { role: 'redo', label: 'Ripeti' },
+      { type: 'separator' },
+      { role: 'cut', label: 'Taglia' },
+      { role: 'copy', label: 'Copia' },
+      { role: 'paste', label: 'Incolla' },
+      { role: 'selectall', label: 'Seleziona tutto' }
+    ]
+  });
+
+  // View menu
+  template.push({
+    label: 'Visualizza',
+    submenu: [
+      { role: 'reload', label: 'Ricarica' },
+      { role: 'forceReload', label: 'Forza ricarica' },
+      { role: 'toggleDevTools', label: 'Strumenti sviluppatore' },
+      { type: 'separator' },
+      { role: 'resetZoom', label: 'Zoom reale' },
+      { role: 'zoomIn', label: 'Ingrandisci' },
+      { role: 'zoomOut', label: 'Riduci' },
+      { type: 'separator' },
+      { role: 'togglefullscreen', label: 'Schermo intero' }
+    ]
+  });
+
+  // Window menu (macOS)
+  if (process.platform === 'darwin') {
+    template.push({
+      label: 'Finestra',
+      submenu: [
+        { role: 'minimize', label: 'Riduci a icona' },
+        { role: 'close', label: 'Chiudi' },
+        { type: 'separator' },
+        { role: 'front', label: 'Porta tutto in primo piano' }
+      ]
+    });
+  }
+
+  // Help menu (Windows/Linux) or separate Help (macOS)
+  const helpMenu = {
+    label: 'Aiuto',
+    submenu: [
+      {
+        label: 'Verifica aggiornamenti...',
+        click: () => checkForUpdatesManually(),
+        enabled: !isDev
+      }
+    ]
+  };
+
+  if (process.platform === 'darwin') {
+    // On macOS, add About to Help menu
+    helpMenu.submenu.unshift({
+      label: `Informazioni su ${app.getName()}`,
+      click: () => {
+        dialog.showMessageBox(mainWindow, {
+          type: 'info',
+          title: `Informazioni su ${app.getName()}`,
+          message: app.getName(),
+          detail: `Versione ${app.getVersion()}\n\nTopographic Granulator - Desktop Audio Application`,
+          buttons: ['OK']
+        });
+      }
+    });
+  } else {
+    // On Windows/Linux, add About to Help menu
+    helpMenu.submenu.unshift({ role: 'about', label: `Informazioni su ${app.getName()}` });
+  }
+
+  template.push(helpMenu);
+
+  const menu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(menu);
+}
+
 
 // IPC handlers for file operations (optional - can enhance file picker)
 ipcMain.handle('show-open-dialog', async (event, options) => {
