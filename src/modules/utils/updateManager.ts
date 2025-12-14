@@ -58,6 +58,13 @@ export function createUpdateManager() {
     }
   }
 
+  function restartAndInstallUpdate(): Promise<boolean> {
+    if (electronAPI?.restartAndInstallUpdate) {
+      return electronAPI.restartAndInstallUpdate();
+    }
+    return Promise.resolve(false);
+  }
+
   return {
     checkForUpdates,
     onUpdateAvailable,
@@ -66,6 +73,7 @@ export function createUpdateManager() {
     onCheckingForUpdateManual,
     onUpdateNotAvailable,
     onUpdateError,
+    restartAndInstallUpdate,
   };
 }
 

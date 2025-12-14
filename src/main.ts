@@ -3047,14 +3047,49 @@ updateManager.onDownloadProgress((progress) => {
 	}
 });
 
-// Notify when update is downloaded (will auto-install on next restart)
+// Notify when update is downloaded (user can choose when to restart)
+let pendingUpdateInfo: any = null;
 updateManager.onUpdateDownloaded((info) => {
 	logger.log('Update downloaded:', info.version);
+	pendingUpdateInfo = info;
 	if (recordStatusEl) {
-		recordStatusEl.textContent = `Update downloaded! Restart to install v${info.version}`;
+		recordStatusEl.textContent = `Update v${info.version} scaricato! Clicca per riavviare e installare`;
+		recordStatusEl.style.cursor = 'pointer';
+		recordStatusEl.title = 'Clicca per riavviare e installare l\'aggiornamento';
+		
+		// Make it clickable to restart
+		const restartHandler = async () => {
+			if (updateManager.restartAndInstallUpdate) {
+				recordStatusEl.textContent = 'Riavvio in corso...';
+				recordStatusEl.style.cursor = 'default';
+				recordStatusEl.removeEventListener('click', restartHandler);
+				try {
+					await updateManager.restartAndInstallUpdate();
+				} catch (err) {
+					logger.error('Error restarting to install update:', err);
+					recordStatusEl.textContent = 'Errore durante il riavvio';
+				}
+			}
+		};
+		recordStatusEl.addEventListener('click', restartHandler);
+		
+		// Also add keyboard shortcut (R key)
+		const keyboardHandler = async (e: KeyboardEvent) => {
+			if (e.key === 'r' || e.key === 'R') {
+				restartHandler();
+			}
+		};
+		document.addEventListener('keydown', keyboardHandler);
+		
+		// Clear after timeout but keep the click handler
 		setTimeout(() => {
-			recordStatusEl.textContent = '';
-		}, 10000);
+			if (recordStatusEl && recordStatusEl.textContent.includes('scaricato')) {
+				recordStatusEl.textContent = '';
+				recordStatusEl.style.cursor = 'default';
+				recordStatusEl.removeEventListener('click', restartHandler);
+				document.removeEventListener('keydown', keyboardHandler);
+			}
+		}, 30000); // Show for 30 seconds, but user can still click
 	}
 });
 

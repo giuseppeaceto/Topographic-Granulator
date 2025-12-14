@@ -280,12 +280,12 @@ if (!isDev) {
   });
 
   autoUpdater.on('update-downloaded', (info) => {
-    console.log('Update downloaded:', info.version);
+    console.log('[Auto-updater] Update downloaded:', info.version);
     if (mainWindow) {
       mainWindow.webContents.send('update-downloaded', info);
     }
-    // Auto-install on quit (or prompt user)
-    autoUpdater.quitAndInstall(false, true);
+    // Don't auto-install, let user choose when to restart
+    // The update will be installed when user chooses to restart via IPC
   });
 }
 
@@ -432,6 +432,13 @@ ipcMain.handle('get-desktop-sources', async (event) => {
 
 ipcMain.handle('get-app-version', async (event) => {
   return app.getVersion();
+});
+
+ipcMain.handle('restart-and-install-update', async (event) => {
+  console.log('[Auto-updater] User requested restart to install update');
+  // quitAndInstall will close the app and install the update on next launch
+  autoUpdater.quitAndInstall(true, false); // isSilent=false means don't show system dialog
+  return true;
 });
 
 // Handle app protocol for deep linking (optional)
