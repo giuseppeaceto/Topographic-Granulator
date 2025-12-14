@@ -144,6 +144,9 @@ function createWindow() {
   });
 }
 
+// Store the downloaded update path for manual installation if needed (outside dev check)
+let downloadedUpdatePath = null;
+
 // This method will be called when Electron has finished initialization
 app.whenReady().then(() => {
   // Create application menu
@@ -225,6 +228,9 @@ if (!isDev) {
     console.log('[Auto-updater] Channel: default (stable releases)');
   }
   
+  // Note: On macOS, if app is not code-signed, quitAndInstall will fail
+  // We handle this in the restart-and-install-update IPC handler by opening the DMG manually
+  
   autoUpdater.checkForUpdatesAndNotify();
 
   // Check for updates every hour
@@ -262,13 +268,22 @@ if (!isDev) {
       stack: err?.stack,
       fullError: err
     });
+    
+    // Check if error is related to code signature
+    const isSignatureError = err?.message && (
+      err.message.includes('code signature') || 
+      err.message.includes('Could not get code signature')
+    );
+    
     // Show error to user for debugging
     if (mainWindow) {
       mainWindow.webContents.send('update-error', {
         message: err?.message || String(err),
         code: err?.code || err?.errno,
         stack: err?.stack,
-        fullError: err
+        fullError: err,
+        isSignatureError: isSignatureError,
+        requiresManualInstall: isSignatureError
       });
     }
   });
@@ -286,8 +301,70 @@ if (!isDev) {
     }
     // Don't auto-install, let user choose when to restart
     // The update will be installed when user chooses to restart via IPC
+    // Store the downloaded file path for manual installation if needed
+    if (info.path) {
+      downloadedUpdatePath = info.path;
+      console.log('[Auto-updater] Update file path:', info.path);
+    }
   });
 }
+
+// IPC handler for restart and install (defined outside dev check so it's always available)
+ipcMain.handle('restart-and-install-update', async (event) => {
+  if (isDev) {
+    return { success: false, message: 'Updates not available in development mode' };
+  }
+  
+  console.log('[Auto-updater] User requested restart to install update');
+  
+  // On macOS, if app is not code-signed, quitAndInstall will fail
+  // In that case, open the downloaded DMG file instead
+  if (process.platform === 'darwin' && downloadedUpdatePath) {
+    const { shell } = require('electron');
+    try {
+      // Try to install automatically first
+      autoUpdater.quitAndInstall(true, false);
+      return { success: true };
+    } catch (error) {
+      console.error('[Auto-updater] quitAndInstall failed, opening DMG manually:', error);
+      // If automatic install fails, open the DMG file
+      shell.openPath(downloadedUpdatePath).then(() => {
+        console.log('[Auto-updater] Opened DMG file for manual installation');
+        if (mainWindow) {
+          mainWindow.webContents.send('update-install-error', {
+            message: 'L\'app non è firmata digitalmente. Il file di aggiornamento è stato aperto. Installa manualmente trascinando l\'app nella cartella Applicazioni.',
+            requiresManualInstall: true,
+            dmgOpened: true
+          });
+        }
+      }).catch((err) => {
+        console.error('[Auto-updater] Failed to open DMG:', err);
+        if (mainWindow) {
+          mainWindow.webContents.send('update-install-error', {
+            message: 'Impossibile installare automaticamente l\'aggiornamento. Scarica e installa manualmente la nuova versione dal sito.',
+            requiresManualInstall: true
+          });
+        }
+      });
+      return { success: false, requiresManualInstall: true };
+    }
+  } else {
+    // On other platforms or if no path available, try normal install
+    try {
+      autoUpdater.quitAndInstall(true, false);
+      return { success: true };
+    } catch (error) {
+      console.error('[Auto-updater] Error during quitAndInstall:', error);
+      if (mainWindow) {
+        mainWindow.webContents.send('update-install-error', {
+          message: 'Errore durante l\'installazione dell\'aggiornamento. Prova a riavviare l\'app manualmente.',
+          requiresManualInstall: true
+        });
+      }
+      return { success: false, requiresManualInstall: true };
+    }
+  }
+});
 
 // Create application menu
 function createMenu() {
@@ -298,7 +375,18 @@ function createMenu() {
     template.push({
       label: app.getName(),
       submenu: [
-        { role: 'about', label: `Informazioni su ${app.getName()}` },
+        {
+          label: `Informazioni su ${app.getName()}`,
+          click: () => {
+            dialog.showMessageBox(mainWindow, {
+              type: 'info',
+              title: `Informazioni su ${app.getName()}`,
+              message: app.getName(),
+              detail: `Versione ${app.getVersion()}\n\nTopographic Granulator - Desktop Audio Application\n\nStudio: Infrared Dreams\nIdeatore: Giuseppe Aceto`,
+              buttons: ['OK']
+            });
+          }
+        },
         { type: 'separator' },
         {
           label: 'Verifica aggiornamenti...',
@@ -340,20 +428,29 @@ function createMenu() {
   });
 
   // View menu
-  template.push({
+  const viewMenu = {
     label: 'Visualizza',
     submenu: [
       { role: 'reload', label: 'Ricarica' },
-      { role: 'forceReload', label: 'Forza ricarica' },
-      { role: 'toggleDevTools', label: 'Strumenti sviluppatore' },
-      { type: 'separator' },
-      { role: 'resetZoom', label: 'Zoom reale' },
-      { role: 'zoomIn', label: 'Ingrandisci' },
-      { role: 'zoomOut', label: 'Riduci' },
-      { type: 'separator' },
-      { role: 'togglefullscreen', label: 'Schermo intero' }
+      { role: 'forceReload', label: 'Forza ricarica' }
     ]
-  });
+  };
+  
+  // Only show DevTools in development mode
+  if (isDev) {
+    viewMenu.submenu.push({ role: 'toggleDevTools', label: 'Strumenti sviluppatore' });
+  }
+  
+  viewMenu.submenu.push(
+    { type: 'separator' },
+    { role: 'resetZoom', label: 'Zoom reale' },
+    { role: 'zoomIn', label: 'Ingrandisci' },
+    { role: 'zoomOut', label: 'Riduci' },
+    { type: 'separator' },
+    { role: 'togglefullscreen', label: 'Schermo intero' }
+  );
+  
+  template.push(viewMenu);
 
   // Window menu (macOS)
   if (process.platform === 'darwin') {
@@ -389,14 +486,25 @@ function createMenu() {
           type: 'info',
           title: `Informazioni su ${app.getName()}`,
           message: app.getName(),
-          detail: `Versione ${app.getVersion()}\n\nTopographic Granulator - Desktop Audio Application`,
+          detail: `Versione ${app.getVersion()}\n\nTopographic Granulator - Desktop Audio Application\n\nStudio: Infrared Dreams\nIdeatore: Giuseppe Aceto`,
           buttons: ['OK']
         });
       }
     });
   } else {
     // On Windows/Linux, add About to Help menu
-    helpMenu.submenu.unshift({ role: 'about', label: `Informazioni su ${app.getName()}` });
+    helpMenu.submenu.unshift({
+      label: `Informazioni su ${app.getName()}`,
+      click: () => {
+        dialog.showMessageBox(mainWindow, {
+          type: 'info',
+          title: `Informazioni su ${app.getName()}`,
+          message: app.getName(),
+          detail: `Versione ${app.getVersion()}\n\nTopographic Granulator - Desktop Audio Application\n\nStudio: Infrared Dreams\nIdeatore: Giuseppe Aceto`,
+          buttons: ['OK']
+        });
+      }
+    });
   }
 
   template.push(helpMenu);
@@ -432,13 +540,6 @@ ipcMain.handle('get-desktop-sources', async (event) => {
 
 ipcMain.handle('get-app-version', async (event) => {
   return app.getVersion();
-});
-
-ipcMain.handle('restart-and-install-update', async (event) => {
-  console.log('[Auto-updater] User requested restart to install update');
-  // quitAndInstall will close the app and install the update on next launch
-  autoUpdater.quitAndInstall(true, false); // isSilent=false means don't show system dialog
-  return true;
 });
 
 // Handle app protocol for deep linking (optional)
