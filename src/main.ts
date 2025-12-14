@@ -1541,7 +1541,7 @@ function updateVisualsFromXY(x: number, y: number) {
     // 4. Update Knobs UI
     controls.setGranularUI(granularUpdate);
     controls.setFxUI(fxUpdate);
-    refreshParamTilesFromState(); // Updates the knobs rotation
+    refreshParamTilesFromValues(granularUpdate, fxUpdate); // Updates the knobs rotation with interpolated values
     
     // 5. Update XY Pad Visuals (Density, Color, Reverb)
     // We need to know "influence" for specific parameters for visual cues
@@ -1833,13 +1833,11 @@ function getParamOptions(): SelectOption[] {
 		const options: SelectOption[] = [];
 		for (let i = 0; i < padCount; i++) {
 			const r = state.regions.get(i);
-			if (r) {
-				const name = r.name ? ` – ${r.name}` : '';
-				options.push({
-					value: `pad:${i}`,
-					label: `Pad ${i + 1}${name}`
-				});
-			}
+			const name = r?.name ? ` – ${r.name}` : '';
+			options.push({
+				value: `pad:${i}`,
+				label: `Pad ${i + 1}${name}`
+			});
 		}
 		return options;
 	} else {
@@ -2052,36 +2050,36 @@ refreshXYCornerLabels();
 // react to mode changes
 function handleXYModeChange(mode: 'params' | 'pads') {
 	setXYMode(mode);
-	populateParamSelect(customSelectTL);
-	populateParamSelect(customSelectTR);
-	populateParamSelect(customSelectBL);
-	populateParamSelect(customSelectBR);
 	if (mode === 'pads') {
-		// Find first 4 saved pads and use them as defaults
-		const savedPads: number[] = [];
+		// Get all available pads (including those without regions)
 		const padCount = state.regions.getAll().length;
-		for (let i = 0; i < padCount && savedPads.length < 4; i++) {
-			if (state.regions.get(i)) {
-				savedPads.push(i);
-			}
+		const allPads: number[] = [];
+		for (let i = 0; i < padCount; i++) {
+			allPads.push(i);
 		}
-		// Set defaults, repeating last pad if needed
+		// Set defaults, using first pad for all corners if available, otherwise pad 0
 		const defaults = [
-			savedPads[0] ?? savedPads[savedPads.length - 1] ?? 0,
-			savedPads[1] ?? savedPads[savedPads.length - 1] ?? 0,
-			savedPads[2] ?? savedPads[savedPads.length - 1] ?? 0,
-			savedPads[3] ?? savedPads[savedPads.length - 1] ?? 0
+			allPads[0] ?? 0,
+			allPads[1] ?? allPads[0] ?? 0,
+			allPads[2] ?? allPads[0] ?? 0,
+			allPads[3] ?? allPads[0] ?? 0
 		];
+		// Set values before populating to ensure they're valid
 		customSelectTL?.setValue(`pad:${defaults[0]}`);
 		customSelectTR?.setValue(`pad:${defaults[1]}`);
 		customSelectBL?.setValue(`pad:${defaults[2]}`);
 		customSelectBR?.setValue(`pad:${defaults[3]}`);
 	} else {
+		// Set values before populating to ensure they're valid
 		customSelectTL?.setValue('filterCutoffHz');
 		customSelectTR?.setValue('density');
 		customSelectBL?.setValue('reverbMix');
 		customSelectBR?.setValue('pitchSemitones');
 	}
+	populateParamSelect(customSelectTL);
+	populateParamSelect(customSelectTR);
+	populateParamSelect(customSelectBL);
+	populateParamSelect(customSelectBR);
 	refreshXYCornerLabels();
 }
 xyModeParamsBtn?.addEventListener('click', () => handleXYModeChange('params'));
@@ -2628,6 +2626,72 @@ function updateValueDisplay(cfg: KnobConfig, value: number) {
 	
 	labelEl.textContent = label;
 	valueEl.textContent = formattedValue;
+}
+
+// Update knobs with explicit values (used when XY pad position changes)
+// If a parameter is not provided, it will be read from state (for knobs not mapped to XY corners)
+function refreshParamTilesFromValues(granular?: Partial<GranularParams>, effects?: Partial<EffectsParams>) {
+	// Map granular params to knob IDs
+	const granularMap: Record<string, keyof GranularParams> = {
+		'pitch': 'pitchSemitones',
+		'density': 'density',
+		'grain': 'grainSizeMs',
+		'rand': 'randomStartMs'
+	};
+	
+	// Map effects params to knob IDs
+	const effectsMap: Record<string, keyof EffectsParams> = {
+		'filter': 'filterCutoffHz',
+		'res': 'filterQ',
+		'dtime': 'delayTimeSec',
+		'dmix': 'delayMix',
+		'reverb': 'reverbMix',
+		'gain': 'masterGain'
+	};
+	
+	// Update knobs that correspond to granular params
+	Object.entries(granularMap).forEach(([knobId, paramKey]) => {
+		const cfg = knobConfigs.find(k => k.id === knobId);
+		if (!cfg) return;
+		const knobEl = document.querySelector(`.knob[data-knob="${knobId}"]`) as HTMLElement | null;
+		const valEl = document.querySelector(`.tile-value[data-val="${knobId}"]`) as HTMLElement | null;
+		if (!knobEl || !valEl) return;
+		
+		// Use provided value if available, otherwise read from state
+		const value = granular?.[paramKey] != null ? granular[paramKey] : cfg.get();
+		
+		valEl.textContent = cfg.format(value);
+		
+		// Update toggle switch state if applicable
+		if (knobEl.classList.contains('toggle-switch-knob')) {
+			const isActive = value >= (cfg.max + cfg.min) / 2;
+			knobEl.classList.toggle('active', isActive);
+		} else {
+			updateKnobAngle(knobEl, value, cfg);
+		}
+	});
+	
+	// Update knobs that correspond to effects params
+	Object.entries(effectsMap).forEach(([knobId, paramKey]) => {
+		const cfg = knobConfigs.find(k => k.id === knobId);
+		if (!cfg) return;
+		const knobEl = document.querySelector(`.knob[data-knob="${knobId}"]`) as HTMLElement | null;
+		const valEl = document.querySelector(`.tile-value[data-val="${knobId}"]`) as HTMLElement | null;
+		if (!knobEl || !valEl) return;
+		
+		// Use provided value if available, otherwise read from state
+		const value = effects?.[paramKey] != null ? effects[paramKey] : cfg.get();
+		
+		valEl.textContent = cfg.format(value);
+		
+		// Update toggle switch state if applicable
+		if (knobEl.classList.contains('toggle-switch-knob')) {
+			const isActive = value >= (cfg.max + cfg.min) / 2;
+			knobEl.classList.toggle('active', isActive);
+		} else {
+			updateKnobAngle(knobEl, value, cfg);
+		}
+	});
 }
 
 function refreshParamTilesFromState() {

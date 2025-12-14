@@ -206,6 +206,9 @@ export function createCustomSelect(config: CustomSelectConfig) {
 		getValue: () => button.dataset.value || '',
 		setOptions: (newOptions: SelectOption[]) => {
 			dropdown.innerHTML = '';
+			const currentValue = button.dataset.value;
+			const currentOption = newOptions.find(opt => opt.value === currentValue);
+			
 			newOptions.forEach(option => {
 				const item = document.createElement('div');
 				item.className = 'custom-select-option';
@@ -214,7 +217,7 @@ export function createCustomSelect(config: CustomSelectConfig) {
 				const icon = option.icon || (option.value.startsWith('pad:') ? PAD_ICON : PARAM_ICONS[option.value] || '○');
 				item.innerHTML = `<span class="custom-select-icon">${icon}</span><span class="custom-select-label">${option.label}</span>`;
 				
-				if (option.value === button.dataset.value) {
+				if (option.value === currentValue) {
 					item.classList.add('selected');
 					item.setAttribute('aria-selected', 'true');
 				}
@@ -237,6 +240,11 @@ export function createCustomSelect(config: CustomSelectConfig) {
 				(item as HTMLElement).setAttribute('tabindex', '0');
 				dropdown.appendChild(item);
 			});
+			
+			// Update button if current value is not in new options, or if it is, ensure it's displayed correctly
+			if (currentOption) {
+				updateButton();
+			}
 		}
 	};
 }

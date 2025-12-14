@@ -1197,6 +1197,12 @@ h1, h2 { margin: 0 0 8px 0; font-weight: 600; }
   font-size: 14px;
   color: var(--muted);
 }
+.xy-controls-top .control-group:has(#xyModeParams) {
+  display: none;
+}
+.xy-controls-top .xy-hint {
+  margin-left: auto;
+}
 .xy-pad-wrapper .xy-assign {
   width: 100%;
   max-width: 100%;
