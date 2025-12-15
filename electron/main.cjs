@@ -317,51 +317,62 @@ ipcMain.handle('restart-and-install-update', async (event) => {
   
   console.log('[Auto-updater] User requested restart to install update');
   
-  // On macOS, if app is not code-signed, quitAndInstall will fail
-  // In that case, open the downloaded DMG file instead
-  if (process.platform === 'darwin' && downloadedUpdatePath) {
+  // Check if an update is actually downloaded
+  if (!downloadedUpdatePath) {
+    console.error('[Auto-updater] No downloaded update path available');
+    if (mainWindow) {
+      mainWindow.webContents.send('update-install-error', {
+        message: 'Nessun aggiornamento scaricato trovato. Riavvia l\'app manualmente per verificare se l\'aggiornamento è disponibile.',
+        requiresManualInstall: true
+      });
+    }
+    return { success: false, requiresManualInstall: true, message: 'No update downloaded' };
+  }
+  
+  // Since the app is not code-signed and distributed manually,
+  // quitAndInstall won't work reliably on macOS. Instead, we'll:
+  // 1. Try to open the DMG if on macOS
+  // 2. Show a clear message to manually restart the app
+  
+  if (process.platform === 'darwin') {
+    // On macOS, try to open the DMG file for manual installation
     const { shell } = require('electron');
     try {
-      // Try to install automatically first
-      autoUpdater.quitAndInstall(true, false);
-      return { success: true };
-    } catch (error) {
-      console.error('[Auto-updater] quitAndInstall failed, opening DMG manually:', error);
-      // If automatic install fails, open the DMG file
-      shell.openPath(downloadedUpdatePath).then(() => {
-        console.log('[Auto-updater] Opened DMG file for manual installation');
-        if (mainWindow) {
-          mainWindow.webContents.send('update-install-error', {
-            message: 'L\'app non è firmata digitalmente. Il file di aggiornamento è stato aperto. Installa manualmente trascinando l\'app nella cartella Applicazioni.',
-            requiresManualInstall: true,
-            dmgOpened: true
-          });
-        }
-      }).catch((err) => {
-        console.error('[Auto-updater] Failed to open DMG:', err);
-        if (mainWindow) {
-          mainWindow.webContents.send('update-install-error', {
-            message: 'Impossibile installare automaticamente l\'aggiornamento. Scarica e installa manualmente la nuova versione dal sito.',
-            requiresManualInstall: true
-          });
-        }
-      });
-      return { success: false, requiresManualInstall: true };
-    }
-  } else {
-    // On other platforms or if no path available, try normal install
-    try {
-      autoUpdater.quitAndInstall(true, false);
-      return { success: true };
-    } catch (error) {
-      console.error('[Auto-updater] Error during quitAndInstall:', error);
+      await shell.openPath(downloadedUpdatePath);
+      console.log('[Auto-updater] Opened DMG file for manual installation');
       if (mainWindow) {
         mainWindow.webContents.send('update-install-error', {
-          message: 'Errore durante l\'installazione dell\'aggiornamento. Prova a riavviare l\'app manualmente.',
+          message: 'L\'aggiornamento è pronto! Il file di installazione è stato aperto. Installa la nuova versione trascinando l\'app nella cartella Applicazioni, poi chiudi e riavvia l\'app.',
+          requiresManualInstall: true,
+          dmgOpened: true
+        });
+      }
+      return { success: false, requiresManualInstall: true, message: 'Manual install required - DMG opened' };
+    } catch (openError) {
+      console.error('[Auto-updater] Failed to open DMG:', openError);
+      if (mainWindow) {
+        mainWindow.webContents.send('update-install-error', {
+          message: 'Aggiornamento pronto! Chiudi l\'app e riavviala per completare l\'installazione. Il nuovo file sarà disponibile al prossimo avvio.',
           requiresManualInstall: true
         });
       }
-      return { success: false, requiresManualInstall: true };
+      return { success: false, requiresManualInstall: true, message: 'Failed to open DMG - manual restart required' };
+    }
+  } else {
+    // On Windows/Linux, try quitAndInstall but it may not work without code signing
+    try {
+      autoUpdater.quitAndInstall(false, false);
+      // Give it a moment - if it doesn't work, user will need to restart manually
+      return { success: true, message: 'Restarting...' };
+    } catch (error) {
+      console.error('[Auto-updater] Error calling quitAndInstall:', error);
+      if (mainWindow) {
+        mainWindow.webContents.send('update-install-error', {
+          message: 'Aggiornamento pronto! Chiudi l\'app e riavviala manualmente per completare l\'installazione.',
+          requiresManualInstall: true
+        });
+      }
+      return { success: false, requiresManualInstall: true, message: 'Manual restart required' };
     }
   }
 });

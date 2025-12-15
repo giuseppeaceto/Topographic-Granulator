@@ -28,6 +28,15 @@
               </div>
             </div>
             <div class="xy-controls-top">
+              <button
+                id="helpButton"
+                class="help-button"
+                type="button"
+                title="Quick start / Help"
+                aria-label="Open quick start help"
+              >
+                ?
+              </button>
               <div class="control-group">
                 <label style="grid-template-columns:auto auto auto 1fr;gap:8px;align-items:center;">
                   <span>Mode</span>
@@ -180,7 +189,11 @@
             <div class="param-grid">
               <div class="param-tile" data-tile="motion-play">
                 <div class="tile-header">PLAY</div>
-                <button id="motionPlayBtn" class="knob" title="Play/Pause" style="cursor: pointer;"><div class="knob-fill" style="height: 0%;"></div><span class="knob-plus">+</span></button>
+                <button id="motionPlayBtn" class="knob" title="Play/Pause" style="cursor: pointer;">
+                  <div class="knob-fill" style="height: 0%;"></div>
+                  <span class="knob-icon knob-icon-play" aria-hidden="true"></span>
+                  <span class="knob-icon knob-icon-stop" aria-hidden="true"></span>
+                </button>
                 <div class="tile-value">0</div>
               </div>
               <div class="param-tile" data-tile="motion-clear">
@@ -296,6 +309,24 @@
             <div id="fileName" class="filename" style="font-size: 8px; text-align: center; margin-top: 2px; color: var(--muted);" aria-live="polite"></div>
           </div>
 
+          <!-- Empty State Overlay -->
+          <div id="emptyStateOverlay" class="empty-state-overlay" aria-live="polite">
+            <div class="empty-state-card">
+              <div class="empty-state-step">1</div>
+              <div class="empty-state-body">
+                <h3>To get started</h3>
+                <p>Load an audio file from the <strong>FILE</strong> box above.</p>
+                <p class="empty-state-sub">
+                  After loading, you can select a region in the waveform, assign it to a pad,
+                  and explore the topographic space with the large XY pad.
+                </p>
+                <p class="empty-state-hint">
+                  Need help? Click the <strong>?</strong> button in the top left to open the Quick&nbsp;Start.
+                </p>
+              </div>
+            </div>
+          </div>
+
           <!-- Recording Controls -->
           <div class="grid-item grid-item-recording">
             <div class="param-grid">
@@ -353,6 +384,92 @@
           <button id="padEditDelete" class="btn btn-danger" aria-label="Delete this pad" style="margin-right: auto;">Delete Pad</button>
           <button id="padEditCancel" class="btn">Cancel</button>
           <button id="padEditSave" class="btn primary">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick Start / Help Modal -->
+    <div id="quickStartModal" class="modal" aria-hidden="true" style="display: none;">
+      <div class="modal-overlay"></div>
+      <div class="modal-content quickstart-modal">
+        <h3>Quick Start</h3>
+        <p class="quickstart-intro">
+          A short guide to start using Undergrain. You can reopen this from the <strong>?</strong> button.
+        </p>
+        <ol class="quickstart-steps">
+          <li class="quickstart-step">
+            <div class="quickstart-step-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 5h6l2 2h8v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z" />
+                <path d="M12 13v-6" />
+                <path d="M9.5 9.5 12 7l2.5 2.5" />
+              </svg>
+            </div>
+            <div class="quickstart-step-body">
+              <strong>1. Load an audio file</strong><br />
+              Click on <strong>FILE</strong> in the right panel and choose an audio file (WAV, MP3, etc.).
+            </div>
+          </li>
+          <li class="quickstart-step">
+            <div class="quickstart-step-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="3" y="8" width="2" height="8" />
+                <rect x="7" y="6" width="2" height="12" />
+                <rect x="11" y="9" width="2" height="6" />
+                <rect x="15" y="5" width="2" height="14" />
+                <rect x="19" y="8" width="2" height="8" />
+              </svg>
+            </div>
+            <div class="quickstart-step-body">
+              <strong>2. Select the region to granulate</strong><br />
+              In the waveform at the top, drag with the mouse to select the part of the file you want to granulate.
+            </div>
+          </li>
+          <li class="quickstart-step">
+            <div class="quickstart-step-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="4" y="4" width="6" height="6" rx="1" />
+                <rect x="14" y="4" width="6" height="6" rx="1" />
+                <rect x="4" y="14" width="6" height="6" rx="1" />
+                <rect x="14" y="14" width="6" height="6" rx="1" />
+              </svg>
+            </div>
+            <div class="quickstart-step-body">
+              <strong>3. Assign the sound to a pad</strong><br />
+              Switch the XY mode to <strong>Pads</strong>, then click on a pad in the grid to assign the current selection and parameters.
+            </div>
+          </li>
+          <li class="quickstart-step">
+            <div class="quickstart-step-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M12 2v4" />
+                <path d="M12 18v4" />
+                <path d="M2 12h4" />
+                <path d="M18 12h4" />
+                <path d="M5 5l2.5 2.5" />
+                <path d="M19 5l-2.5 2.5" />
+                <path d="M5 19l2.5-2.5" />
+                <path d="M19 19l-2.5-2.5" />
+              </svg>
+            </div>
+            <div class="quickstart-step-body">
+              <strong>4. Explore the topographic space</strong><br />
+              Move the cursor on the big XY pad (or use the arrow keys) to explore variations of the sound in the topographic space.
+            </div>
+          </li>
+        </ol>
+        <p class="quickstart-extra">
+          Pads remember their settings when <strong>RECALL</strong> is ON, and you can use <strong>MIDI</strong> learn to control parameters from a controller.
+        </p>
+        <div class="quickstart-actions">
+          <label class="quickstart-checkbox">
+            <input type="checkbox" id="quickStartDontShow" />
+            <span>Don’t show this at startup</span>
+          </label>
+          <button id="quickStartClose" class="btn primary quickstart-primary-btn" type="button">
+            <span>Got&nbsp;it</span>
+          </button>
         </div>
       </div>
     </div>

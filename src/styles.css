@@ -112,6 +112,86 @@ body {
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
   overflow: hidden;
 }
+
+/* Empty state - shown when nessun file è ancora caricato */
+body.empty-state .xy-pad-container,
+body.empty-state .app-sidebar .grid-item:not(.grid-item-file) {
+  opacity: 0.35;
+  filter: grayscale(0.1);
+  pointer-events: none;
+}
+
+/* Mantieni attivo e ben visibile il riquadro FILE */
+body.empty-state .grid-item-file,
+body.empty-state .grid-item-file * {
+  opacity: 1;
+  filter: none;
+  pointer-events: auto;
+}
+
+/* Overlay di guida iniziale */
+.empty-state-overlay {
+  grid-column: 10 / -1;
+  grid-row: 2;
+  display: none;
+  align-items: flex-start;
+  justify-content: flex-start;
+  z-index: 150;
+  pointer-events: none;
+  margin-top: 12px;
+}
+
+body.empty-state .empty-state-overlay {
+  display: flex;
+}
+
+.empty-state-card {
+  pointer-events: auto;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  border-radius: 16px;
+  padding: 14px 16px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  backdrop-filter: blur(14px) saturate(130%);
+  width: 100%;
+  max-width: 100%;
+}
+
+.empty-state-step {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.empty-state-body h3 {
+  margin: 0 0 4px 0;
+  font-size: 14px;
+}
+
+.empty-state-body p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.empty-state-sub {
+  margin-top: 4px;
+  opacity: 0.9;
+}
+
+.empty-state-hint {
+  margin-top: 6px;
+  opacity: 0.8;
+}
 .app-header, .app-footer {
   padding: 12px 16px;
   background: var(--panel);
@@ -382,10 +462,142 @@ h1, h2 { margin: 0 0 8px 0; font-weight: 600; }
   padding-top: 12px;
   border-top: 1px solid rgba(0, 0, 0, 0.05);
   width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 [data-theme="dark"] .xy-floating-header .xy-controls-top {
   border-top: 1px solid rgba(255, 255, 255, 0.02);
+}
+
+.help-button {
+  border: none;
+  background: var(--panel);
+  color: var(--fg-subtle, #555);
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  margin-right: 8px;
+  box-shadow:
+    2px 2px 4px rgba(0, 0, 0, 0.15),
+    -2px -2px 4px rgba(255, 255, 255, 0.8);
+}
+
+[data-theme="dark"] .help-button {
+  color: #ddd;
+  box-shadow:
+    2px 2px 4px rgba(0, 0, 0, 0.7),
+    -2px -2px 4px rgba(255, 255, 255, 0.05);
+}
+
+.help-button:hover {
+  transform: translateY(-1px);
+}
+
+.help-button:active {
+  transform: translateY(0);
+  box-shadow:
+    1px 1px 2px rgba(0, 0, 0, 0.2),
+    -1px -1px 2px rgba(255, 255, 255, 0.6);
+}
+
+/* Quickstart modal layout tweaks (content width overridden later for this one only) */
+.quickstart-modal {
+  /* base width is controlled by .modal-content.quickstart-modal at the bottom of the file */
+}
+
+.quickstart-intro {
+  margin-top: 0;
+  margin-bottom: 8px;
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+.quickstart-steps {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.quickstart-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.quickstart-step-icon {
+  flex: 0 0 32px;
+  height: 32px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--panel);
+  box-shadow:
+    2px 2px 4px rgba(0, 0, 0, 0.25),
+    -2px -2px 4px rgba(255, 255, 255, 0.1);
+  color: var(--color-control, #1976d2);
+}
+
+.quickstart-step-icon svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.6;
+}
+
+.quickstart-step-icon svg rect,
+.quickstart-step-icon svg circle {
+  fill: none;
+}
+
+.quickstart-step-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.quickstart-extra {
+  margin-top: 10px;
+  font-size: 11px;
+  opacity: 0.9;
+}
+
+.quickstart-actions {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.quickstart-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.quickstart-primary-btn {
+  white-space: nowrap;
+  padding-inline: 18px;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 /* Sidebar - Right side with Neumorphic Soft UI - no scroll */
 /* Using 12 columns for Metro-style tile layout */
@@ -3412,6 +3624,46 @@ hr { border: none; border-top: 1px solid var(--hr-color); margin: 14px 0; }
   font-weight: 700;
   opacity: .6;
 }
+
+/* Motion play/stop icons inside knob */
+.knob-icon {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  display: inline-block;
+}
+
+/* Play: triangle */
+.knob-icon-play {
+  border-style: solid;
+  border-width: 5px 0 5px 8px;
+  border-color: transparent transparent transparent var(--knob-plus-color);
+  transform: translateX(1px);
+}
+
+/* Stop: square – hidden by default, shown when button is active */
+.knob-icon-stop {
+  border-radius: 1px;
+  background-color: var(--knob-plus-color);
+  display: none;
+}
+
+/* Toggle icons based on .active state from MotionPanel */
+#motionPlayBtn .knob-icon-play {
+  display: inline-block;
+}
+
+#motionPlayBtn .knob-icon-stop {
+  display: none;
+}
+
+#motionPlayBtn.active .knob-icon-play {
+  display: none;
+}
+
+#motionPlayBtn.active .knob-icon-stop {
+  display: inline-block;
+}
 .tile-value {
   display: none; /* Hidden - values shown in unified display box */
 }
@@ -3686,11 +3938,23 @@ hr { border: none; border-top: 1px solid var(--hr-color); margin: 14px 0; }
   position: relative;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 12px;
   padding: 16px;
   width: 320px;
   max-width: 90vw;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(14px) saturate(130%);
+}
+.modal-content.quickstart-modal {
+  width: 720px;
+  max-width: 95vw;
+  min-height: 260px;
+  max-height: 80vh;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
 }
 .modal-content h3 {
   margin-top: 0;

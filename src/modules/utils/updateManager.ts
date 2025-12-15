@@ -11,6 +11,7 @@ export function createUpdateManager() {
       onUpdateAvailable: () => {},
       onDownloadProgress: () => {},
       onUpdateDownloaded: () => {},
+      onUpdateInstallError: () => {},
     };
   }
 
@@ -58,11 +59,17 @@ export function createUpdateManager() {
     }
   }
 
-  function restartAndInstallUpdate(): Promise<boolean> {
+  function onUpdateInstallError(callback: (error: any) => void) {
+    if (electronAPI?.onUpdateInstallError) {
+      electronAPI.onUpdateInstallError(callback);
+    }
+  }
+
+  function restartAndInstallUpdate(): Promise<any> {
     if (electronAPI?.restartAndInstallUpdate) {
       return electronAPI.restartAndInstallUpdate();
     }
-    return Promise.resolve(false);
+    return Promise.resolve({ success: false, message: 'Update API not available' });
   }
 
   return {
@@ -73,6 +80,7 @@ export function createUpdateManager() {
     onCheckingForUpdateManual,
     onUpdateNotAvailable,
     onUpdateError,
+    onUpdateInstallError,
     restartAndInstallUpdate,
   };
 }

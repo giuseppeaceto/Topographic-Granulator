@@ -86,6 +86,11 @@ const recordStatusEl = document.getElementById('recordStatus') as HTMLElement;
 const themeToggleBtn = document.getElementById('themeToggle') as HTMLButtonElement;
 const themeIcon = document.getElementById('themeIcon') as HTMLElement;
 const appLogo = document.getElementById('appLogo') as HTMLImageElement;
+const helpButton = document.getElementById('helpButton') as HTMLButtonElement | null;
+const quickStartModal = document.getElementById('quickStartModal') as HTMLDivElement | null;
+const quickStartClose = document.getElementById('quickStartClose') as HTMLButtonElement | null;
+const quickStartDontShow = document.getElementById('quickStartDontShow') as HTMLInputElement | null;
+const QUICKSTART_STORAGE_KEY = 'undergrain_quickstart_dont_show';
 
 // Helper to get correct asset path for Electron and browser
 function getAssetPath(path: string): string {
@@ -146,6 +151,62 @@ if (themeToggleBtn && themeIcon) {
 		if (fill) fill.style.height = newTheme === 'dark' ? '100%' : '0%';
 		if (valEl) valEl.textContent = newTheme === 'dark' ? '1' : '0';
 	});
+}
+
+// Quick Start / Help modal logic
+function openQuickStartModal() {
+	if (!quickStartModal) return;
+	quickStartModal.style.display = 'flex';
+	quickStartModal.setAttribute('aria-hidden', 'false');
+	quickStartModal.classList.add('open');
+}
+
+function closeQuickStartModal() {
+	if (!quickStartModal) return;
+	quickStartModal.classList.remove('open');
+	setTimeout(() => {
+		quickStartModal.style.display = 'none';
+		quickStartModal.setAttribute('aria-hidden', 'true');
+	}, 150);
+}
+
+if (helpButton) {
+	helpButton.addEventListener('click', () => {
+		openQuickStartModal();
+	});
+}
+
+if (quickStartClose) {
+	quickStartClose.addEventListener('click', () => {
+		if (quickStartDontShow && quickStartDontShow.checked) {
+			try {
+				localStorage.setItem(QUICKSTART_STORAGE_KEY, '1');
+			} catch (e) {
+				logger.warn('Failed to persist quickstart preference', e);
+			}
+		}
+		closeQuickStartModal();
+	});
+}
+
+if (quickStartModal) {
+	quickStartModal.addEventListener('click', (evt) => {
+		if (evt.target === quickStartModal) {
+			closeQuickStartModal();
+		}
+	});
+}
+
+// Show quick start on first launch (unless user disabled it)
+try {
+	const dontShow = typeof localStorage !== 'undefined'
+		? localStorage.getItem(QUICKSTART_STORAGE_KEY)
+		: null;
+	if (!dontShow) {
+		openQuickStartModal();
+	}
+} catch (e) {
+	// Ignore if localStorage is not available (e.g. some embedded contexts)
 }
 
 // Watch for theme changes and update UI components
@@ -1137,7 +1198,9 @@ async function ensureEngine() {
 	if (!state.voiceManager) {
 		try {
 			state.voiceManager = new VoiceManager(state.contextMgr.audioContext, 4);
-			ensureEffects();
+		ensureEffects();
+		// Exit empty state now that a buffer is available
+		setEmptyState(false);
 			await state.voiceManager.init(state.effects!.input, (index) => state.padParams.get(index));
 			
 			if (state.buffer) {
@@ -2921,6 +2984,22 @@ function initButtonKnobs() {
 initAllKnobs();
 initButtonKnobs();
 
+// Empty state handling: guida l'utente finché non è stato caricato un file
+const emptyStateOverlay = document.getElementById('emptyStateOverlay');
+
+function setEmptyState(isEmpty: boolean) {
+	if (isEmpty) {
+		document.body.classList.add('empty-state');
+		if (emptyStateOverlay) emptyStateOverlay.style.display = 'flex';
+	} else {
+		document.body.classList.remove('empty-state');
+		if (emptyStateOverlay) emptyStateOverlay.style.display = 'none';
+	}
+}
+
+// All'avvio non c'è alcun buffer, quindi entriamo nello stato empty
+setEmptyState(!state.buffer);
+
 // Initialize value display box with default
 const box = document.getElementById('valueDisplayBox');
 const labelEl = box?.querySelector('.value-display-label') as HTMLElement | null;
@@ -3113,49 +3192,120 @@ updateManager.onDownloadProgress((progress) => {
 
 // Notify when update is downloaded (user can choose when to restart)
 let pendingUpdateInfo: any = null;
+let updateRestartHandler: (() => Promise<void>) | null = null;
+let updateKeyboardHandler: ((e: KeyboardEvent) => void) | null = null;
+
+function clearUpdateNotification() {
+	if (recordStatusEl && updateRestartHandler) {
+		recordStatusEl.textContent = '';
+		recordStatusEl.style.cursor = 'default';
+		recordStatusEl.removeEventListener('click', updateRestartHandler);
+		if (updateKeyboardHandler) {
+			document.removeEventListener('keydown', updateKeyboardHandler);
+		}
+		updateRestartHandler = null;
+		updateKeyboardHandler = null;
+	}
+}
+
 updateManager.onUpdateDownloaded((info) => {
 	logger.log('Update downloaded:', info.version);
 	pendingUpdateInfo = info;
+	
 	if (recordStatusEl) {
-		recordStatusEl.textContent = `Update v${info.version} scaricato! Clicca per riavviare e installare`;
+		// Clear any previous handlers
+		clearUpdateNotification();
+		
+		recordStatusEl.textContent = `⚠️ Aggiornamento v${info.version} pronto! Clicca qui per installare`;
 		recordStatusEl.style.cursor = 'pointer';
-		recordStatusEl.title = 'Clicca per riavviare e installare l\'aggiornamento';
+		recordStatusEl.style.color = '#ffa500'; // Orange color to make it stand out
+		recordStatusEl.title = 'Clicca per aprire il file di installazione (potrebbe essere necessario chiudere e riavviare l\'app manualmente)';
+		recordStatusEl.classList.add('update-ready');
 		
 		// Make it clickable to restart
-		const restartHandler = async () => {
-			if (updateManager.restartAndInstallUpdate) {
-				recordStatusEl.textContent = 'Riavvio in corso...';
+		updateRestartHandler = async () => {
+			if (updateManager.restartAndInstallUpdate && recordStatusEl) {
+				recordStatusEl.textContent = 'Installazione in corso...';
 				recordStatusEl.style.cursor = 'default';
-				recordStatusEl.removeEventListener('click', restartHandler);
+				
 				try {
-					await updateManager.restartAndInstallUpdate();
-				} catch (err) {
-					logger.error('Error restarting to install update:', err);
-					recordStatusEl.textContent = 'Errore durante il riavvio';
+					const result = await updateManager.restartAndInstallUpdate();
+					
+					// Since app is not code-signed, it will likely require manual restart
+					if (result && !result.success && result.requiresManualInstall) {
+						// Keep the message from the error handler, it's more specific
+						logger.log('Manual restart required for update installation');
+					} else if (result && result.success) {
+						// This is unlikely for non-signed apps, but handle it anyway
+						recordStatusEl.textContent = 'Riavvio...';
+						recordStatusEl.style.color = '';
+					} else {
+						// Fallback message
+						recordStatusEl.textContent = 'Chiudi l\'app e riavviala manualmente per completare l\'aggiornamento';
+						recordStatusEl.style.color = '#ffa500';
+						recordStatusEl.style.cursor = 'default';
+					}
+				} catch (err: any) {
+					logger.error('Error installing update:', err);
+					recordStatusEl.textContent = 'Chiudi l\'app e riavviala manualmente per completare l\'aggiornamento';
+					recordStatusEl.style.color = '#ffa500';
+					recordStatusEl.style.cursor = 'default';
 				}
 			}
 		};
-		recordStatusEl.addEventListener('click', restartHandler);
 		
-		// Also add keyboard shortcut (R key)
-		const keyboardHandler = async (e: KeyboardEvent) => {
+		recordStatusEl.addEventListener('click', updateRestartHandler);
+		
+		// Also add keyboard shortcut (R key) when focused
+		updateKeyboardHandler = async (e: KeyboardEvent) => {
+			// Only trigger if not typing in an input field
+			const target = e.target as HTMLElement;
+			if ((target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') && target.isContentEditable !== true) {
+				return;
+			}
 			if (e.key === 'r' || e.key === 'R') {
-				restartHandler();
+				if (updateRestartHandler) {
+					updateRestartHandler();
+				}
 			}
 		};
-		document.addEventListener('keydown', keyboardHandler);
-		
-		// Clear after timeout but keep the click handler
-		setTimeout(() => {
-			if (recordStatusEl && recordStatusEl.textContent.includes('scaricato')) {
-				recordStatusEl.textContent = '';
-				recordStatusEl.style.cursor = 'default';
-				recordStatusEl.removeEventListener('click', restartHandler);
-				document.removeEventListener('keydown', keyboardHandler);
-			}
-		}, 30000); // Show for 30 seconds, but user can still click
+		document.addEventListener('keydown', updateKeyboardHandler);
 	}
 });
+
+// Handle update install info/errors (e.g., when manual restart is required)
+if (updateManager.onUpdateInstallError) {
+	updateManager.onUpdateInstallError((error) => {
+		logger.log('Update install info:', error);
+		
+		if (recordStatusEl) {
+			const message = error?.message || 'Chiudi l\'app e riavviala manualmente per completare l\'aggiornamento';
+			const requiresManualInstall = error?.requiresManualInstall !== false;
+			const dmgOpened = error?.dmgOpened === true;
+			
+			// Don't clear the notification, just update the message
+			// This is expected behavior for non-code-signed apps
+			if (dmgOpened) {
+				recordStatusEl.textContent = `📦 ${message}`;
+				recordStatusEl.style.color = '#4CAF50'; // Green to indicate DMG opened successfully
+			} else {
+				recordStatusEl.textContent = `⚠️ ${message}`;
+				recordStatusEl.style.color = '#ffa500'; // Orange to indicate action needed
+			}
+			recordStatusEl.style.cursor = 'default';
+			recordStatusEl.title = message;
+			
+			// Keep the message visible for longer (10 minutes) so user sees it
+			setTimeout(() => {
+				if (recordStatusEl && (recordStatusEl.textContent.includes('Chiudi l\'app') || recordStatusEl.textContent.includes('Installa'))) {
+					// Only clear if it's still the update message
+					recordStatusEl.textContent = '';
+					recordStatusEl.style.color = '';
+				}
+			}, 600000); // 10 minutes
+		}
+	});
+}
 
 // Initialize tooltips for all interactive elements
 // Wait for DOM to be fully loaded

@@ -37,6 +37,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onUpdateError: (callback) => {
     ipcRenderer.on('update-error', (event, error) => callback(error));
   },
+  onUpdateInstallError: (callback) => {
+    ipcRenderer.on('update-install-error', (event, error) => callback(error));
+  },
   
   // Platform info
   platform: process.platform,

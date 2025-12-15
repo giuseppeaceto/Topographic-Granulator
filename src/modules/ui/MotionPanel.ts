@@ -151,9 +151,9 @@ export function createMotionPanel(config: MotionPanelConfig) {
 		if (path.length < 2) return;
 		isPlaying = true;
 		config.onPlayStateChange?.(true);
-		playBtn.textContent = 'Stop';
 		playBtn.classList.add('active');
-        
+        playBtn.setAttribute('aria-pressed', 'true');
+
         if (config.externalClock) return; // Don't start internal loop
 
 		playStartTime = performance.now() - (offsetMs / speed);
@@ -219,8 +219,8 @@ export function createMotionPanel(config: MotionPanelConfig) {
 	function stopPlayback() {
 		isPlaying = false;
 		config.onPlayStateChange?.(false);
-		playBtn.textContent = 'Play';
 		playBtn.classList.remove('active');
+        playBtn.setAttribute('aria-pressed', 'false');
 		if (animationFrame) cancelAnimationFrame(animationFrame);
 	}
 
@@ -300,9 +300,13 @@ export function createMotionPanel(config: MotionPanelConfig) {
             // Force UI update without triggering callbacks
             if (playing !== isPlaying) {
                 isPlaying = playing;
-                playBtn.textContent = playing ? 'Stop' : 'Play';
-                if (playing) playBtn.classList.add('active');
-                else playBtn.classList.remove('active');
+                if (playing) {
+                    playBtn.classList.add('active');
+                    playBtn.setAttribute('aria-pressed', 'true');
+                } else {
+                    playBtn.classList.remove('active');
+                    playBtn.setAttribute('aria-pressed', 'false');
+                }
                 // If internal clock, handle loop start/stop? 
                 // For now assuming this is used mainly for external sync
                 if (!config.externalClock) {
