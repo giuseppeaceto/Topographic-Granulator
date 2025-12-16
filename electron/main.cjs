@@ -28,7 +28,7 @@ function createWindow() {
       // Web Audio API is enabled by default in Electron
       // Note: Security warnings in dev mode are expected and won't appear in production
     },
-    icon: path.join(__dirname, '../public/images/logo.png'),
+    icon: path.join(__dirname, '../public/icons/icon.png'),
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     show: false, // Don't show until ready
   });
@@ -296,15 +296,29 @@ if (!isDev) {
 
   autoUpdater.on('update-downloaded', (info) => {
     console.log('[Auto-updater] Update downloaded:', info.version);
+    console.log('[Auto-updater] Update info:', JSON.stringify(info, null, 2));
     if (mainWindow) {
       mainWindow.webContents.send('update-downloaded', info);
     }
     // Don't auto-install, let user choose when to restart
     // The update will be installed when user chooses to restart via IPC
     // Store the downloaded file path for manual installation if needed
-    if (info.path) {
-      downloadedUpdatePath = info.path;
-      console.log('[Auto-updater] Update file path:', info.path);
+    //
+    // NOTE: With recent electron-updater versions the property is `downloadedFile`,
+    // while older code sometimes used `path`. We support both to be safe.
+    const downloadedFilePath = info.downloadedFile || info.path;
+    if (downloadedFilePath) {
+      downloadedUpdatePath = downloadedFilePath;
+      console.log('[Auto-updater] Update file path:', downloadedFilePath);
+      // Verify file exists
+      const fs = require('fs');
+      if (fs.existsSync(downloadedFilePath)) {
+        console.log('[Auto-updater] Update file exists and is accessible');
+      } else {
+        console.error('[Auto-updater] Update file path does not exist:', downloadedFilePath);
+      }
+    } else {
+      console.warn('[Auto-updater] No downloadedFile/path in update info; manual install may be required from GitHub release page');
     }
   });
 }
@@ -322,7 +336,7 @@ ipcMain.handle('restart-and-install-update', async (event) => {
     console.error('[Auto-updater] No downloaded update path available');
     if (mainWindow) {
       mainWindow.webContents.send('update-install-error', {
-        message: 'Nessun aggiornamento scaricato trovato. Riavvia l\'app manualmente per verificare se l\'aggiornamento è disponibile.',
+        message: 'No update found. Restart the app to check for updates.',
         requiresManualInstall: true
       });
     }
@@ -337,26 +351,67 @@ ipcMain.handle('restart-and-install-update', async (event) => {
   if (process.platform === 'darwin') {
     // On macOS, try to open the DMG file for manual installation
     const { shell } = require('electron');
-    try {
-      await shell.openPath(downloadedUpdatePath);
-      console.log('[Auto-updater] Opened DMG file for manual installation');
+    const fs = require('fs');
+    const path = require('path');
+    
+    console.log('[Auto-updater] Attempting to open update file:', downloadedUpdatePath);
+    
+    // Verify file exists
+    if (!downloadedUpdatePath || !fs.existsSync(downloadedUpdatePath)) {
+      console.error('[Auto-updater] Update file does not exist:', downloadedUpdatePath);
       if (mainWindow) {
         mainWindow.webContents.send('update-install-error', {
-          message: 'L\'aggiornamento è pronto! Il file di installazione è stato aperto. Installa la nuova versione trascinando l\'app nella cartella Applicazioni, poi chiudi e riavvia l\'app.',
-          requiresManualInstall: true,
-          dmgOpened: true
-        });
-      }
-      return { success: false, requiresManualInstall: true, message: 'Manual install required - DMG opened' };
-    } catch (openError) {
-      console.error('[Auto-updater] Failed to open DMG:', openError);
-      if (mainWindow) {
-        mainWindow.webContents.send('update-install-error', {
-          message: 'Aggiornamento pronto! Chiudi l\'app e riavviala per completare l\'installazione. Il nuovo file sarà disponibile al prossimo avvio.',
+          message: 'Update ready! Download from GitHub and install manually, then restart.',
           requiresManualInstall: true
         });
       }
-      return { success: false, requiresManualInstall: true, message: 'Failed to open DMG - manual restart required' };
+      return { success: false, requiresManualInstall: true, message: 'Update file not found' };
+    }
+    
+    try {
+      // Use shell.openPath which returns a promise that resolves with an error string if it fails
+      const error = await shell.openPath(downloadedUpdatePath);
+      if (error) {
+        // shell.openPath returns an error string if it fails, empty string if success
+        console.error('[Auto-updater] Failed to open file:', error);
+        // Try opening the directory containing the file instead
+        const fileDir = path.dirname(downloadedUpdatePath);
+        console.log('[Auto-updater] Trying to open directory instead:', fileDir);
+        const dirError = await shell.openPath(fileDir);
+        if (dirError) {
+          console.error('[Auto-updater] Failed to open directory:', dirError);
+          throw new Error(`Cannot open file or directory: ${error}`);
+        } else {
+          console.log('[Auto-updater] Opened directory containing update file');
+          if (mainWindow) {
+            mainWindow.webContents.send('update-install-error', {
+              message: 'Update folder opened. Install the app, then restart.',
+              requiresManualInstall: true,
+              dmgOpened: false
+            });
+          }
+          return { success: false, requiresManualInstall: true, message: 'Directory opened' };
+        }
+      } else {
+        console.log('[Auto-updater] Successfully opened update file');
+        if (mainWindow) {
+          mainWindow.webContents.send('update-install-error', {
+            message: 'Update ready! Installer opened. Install the app, then restart.',
+            requiresManualInstall: true,
+            dmgOpened: true
+          });
+        }
+        return { success: false, requiresManualInstall: true, message: 'File opened successfully' };
+      }
+    } catch (openError) {
+      console.error('[Auto-updater] Error opening file:', openError);
+      if (mainWindow) {
+        mainWindow.webContents.send('update-install-error', {
+          message: 'Update ready! Restart the app to complete installation.',
+          requiresManualInstall: true
+        });
+      }
+      return { success: false, requiresManualInstall: true, message: 'Failed to open file' };
     }
   } else {
     // On Windows/Linux, try quitAndInstall but it may not work without code signing
@@ -368,7 +423,7 @@ ipcMain.handle('restart-and-install-update', async (event) => {
       console.error('[Auto-updater] Error calling quitAndInstall:', error);
       if (mainWindow) {
         mainWindow.webContents.send('update-install-error', {
-          message: 'Aggiornamento pronto! Chiudi l\'app e riavviala manualmente per completare l\'installazione.',
+          message: 'Update ready! Restart the app to complete installation.',
           requiresManualInstall: true
         });
       }
@@ -387,13 +442,13 @@ function createMenu() {
       label: app.getName(),
       submenu: [
         {
-          label: `Informazioni su ${app.getName()}`,
+          label: `About ${app.getName()}`,
           click: () => {
             dialog.showMessageBox(mainWindow, {
               type: 'info',
-              title: `Informazioni su ${app.getName()}`,
+              title: `About ${app.getName()}`,
               message: app.getName(),
-              detail: `Versione ${app.getVersion()}\n\nTopographic Granulator - Desktop Audio Application\n\nStudio: Infrared Dreams\nIdeatore: Giuseppe Aceto`,
+              detail: `Version ${app.getVersion()}\n\nTopographic Granulator - Desktop Audio Application\n\nStudio: Infrared Dreams\nCreator: Giuseppe Aceto`,
               buttons: ['OK']
             });
           }
@@ -505,13 +560,13 @@ function createMenu() {
   } else {
     // On Windows/Linux, add About to Help menu
     helpMenu.submenu.unshift({
-      label: `Informazioni su ${app.getName()}`,
+      label: `About ${app.getName()}`,
       click: () => {
         dialog.showMessageBox(mainWindow, {
           type: 'info',
-          title: `Informazioni su ${app.getName()}`,
+          title: `About ${app.getName()}`,
           message: app.getName(),
-          detail: `Versione ${app.getVersion()}\n\nTopographic Granulator - Desktop Audio Application\n\nStudio: Infrared Dreams\nIdeatore: Giuseppe Aceto`,
+          detail: `Version ${app.getVersion()}\n\nTopographic Granulator - Desktop Audio Application\n\nStudio: Infrared Dreams\nCreator: Giuseppe Aceto`,
           buttons: ['OK']
         });
       }

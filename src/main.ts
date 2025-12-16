@@ -3216,16 +3216,16 @@ updateManager.onUpdateDownloaded((info) => {
 		// Clear any previous handlers
 		clearUpdateNotification();
 		
-		recordStatusEl.textContent = `⚠️ Aggiornamento v${info.version} pronto! Clicca qui per installare`;
+		recordStatusEl.textContent = `⚠️ Update v${info.version} ready! Click to install`;
 		recordStatusEl.style.cursor = 'pointer';
 		recordStatusEl.style.color = '#ffa500'; // Orange color to make it stand out
-		recordStatusEl.title = 'Clicca per aprire il file di installazione (potrebbe essere necessario chiudere e riavviare l\'app manualmente)';
+		recordStatusEl.title = 'Click to open installer (restart may be required)';
 		recordStatusEl.classList.add('update-ready');
 		
 		// Make it clickable to restart
 		updateRestartHandler = async () => {
 			if (updateManager.restartAndInstallUpdate && recordStatusEl) {
-				recordStatusEl.textContent = 'Installazione in corso...';
+				recordStatusEl.textContent = 'Installing...';
 				recordStatusEl.style.cursor = 'default';
 				
 				try {
@@ -3237,11 +3237,11 @@ updateManager.onUpdateDownloaded((info) => {
 						logger.log('Manual restart required for update installation');
 					} else if (result && result.success) {
 						// This is unlikely for non-signed apps, but handle it anyway
-						recordStatusEl.textContent = 'Riavvio...';
+						recordStatusEl.textContent = 'Restarting...';
 						recordStatusEl.style.color = '';
 					} else {
 						// Fallback message
-						recordStatusEl.textContent = 'Chiudi l\'app e riavviala manualmente per completare l\'aggiornamento';
+						recordStatusEl.textContent = 'Restart the app to complete update';
 						recordStatusEl.style.color = '#ffa500';
 						recordStatusEl.style.cursor = 'default';
 					}
@@ -3279,7 +3279,7 @@ if (updateManager.onUpdateInstallError) {
 		logger.log('Update install info:', error);
 		
 		if (recordStatusEl) {
-			const message = error?.message || 'Chiudi l\'app e riavviala manualmente per completare l\'aggiornamento';
+			const message = error?.message || 'Restart the app to complete update';
 			const requiresManualInstall = error?.requiresManualInstall !== false;
 			const dmgOpened = error?.dmgOpened === true;
 			
@@ -3297,7 +3297,7 @@ if (updateManager.onUpdateInstallError) {
 			
 			// Keep the message visible for longer (10 minutes) so user sees it
 			setTimeout(() => {
-				if (recordStatusEl && (recordStatusEl.textContent.includes('Chiudi l\'app') || recordStatusEl.textContent.includes('Installa'))) {
+				if (recordStatusEl && (recordStatusEl.textContent.includes('Restart') || recordStatusEl.textContent.includes('Install'))) {
 					// Only clear if it's still the update message
 					recordStatusEl.textContent = '';
 					recordStatusEl.style.color = '';
