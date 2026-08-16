@@ -123,6 +123,8 @@ export async function createGranularWorkletEngine(ctx: AudioContext): Promise<Gr
 			delayMix: 0.15,
 			delayFeedback: 0.3,
 			reverbMix: 0.2,
+			reverbRoom: 0.5,
+			reverbDamp: 0.5,
 			masterGain: 0.9
 		};
 		// ... closures ...
@@ -185,6 +187,8 @@ export async function createGranularWorkletEngine(ctx: AudioContext): Promise<Gr
 					delayFeedback: fxParams.delayFeedback,
 					delayMix: fxParams.delayMix,
 					reverbMix: fxParams.reverbMix,
+					reverbRoom: fxParams.reverbRoom ?? 0.5,
+					reverbDamp: fxParams.reverbDamp ?? 0.5,
 					masterGain: fxParams.masterGain
 				}
 			});
@@ -214,6 +218,8 @@ export async function createGranularWorkletEngine(ctx: AudioContext): Promise<Gr
 					delayFeedback: fxParams.delayFeedback,
 					delayMix: fxParams.delayMix,
 					reverbMix: fxParams.reverbMix,
+					reverbRoom: fxParams.reverbRoom ?? 0.5,
+					reverbDamp: fxParams.reverbDamp ?? 0.5,
 					masterGain: fxParams.masterGain,
 					
 					startSample,

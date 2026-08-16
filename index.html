@@ -47,6 +47,7 @@
                   <div class="file-loading-spinner" style="display: none;"></div>
                 </label>
                 <input id="fileInput" type="file" accept="audio/*" class="visually-hidden" />
+                <input id="padAudioInput" type="file" accept="audio/*" class="visually-hidden" />
               </div>
 
               <div id="fileName" class="filename-badge" aria-live="polite">No File Loaded</div>
@@ -380,7 +381,7 @@
                       <div class="tile-value" data-val="res">0</div>
                     </div>
                     <div class="param-tile" data-tile="dtime">
-                      <div class="tile-header">DLY-T</div>
+                      <div class="tile-header" id="delaySyncLabel" title="Click to sync delay to marker BPM">DLY-T</div>
                       <div class="knob" data-knob="dtime" data-tooltip="Delay time in seconds (0-1.2s)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
                       <div class="tile-value" data-val="dtime">0.25</div>
                     </div>
@@ -591,12 +592,46 @@
                     </div>
                   </div>
                   <div class="utility-section">
-                    <div class="rack-header">MIDI ENGINE</div>
+                    <div class="rack-header">SESSION</div>
                     <div class="param-grid-2col">
+                      <div class="param-tile" data-tile="session-save">
+                        <div class="tile-header">SAVE</div>
+                        <button id="sessionSaveBtn" class="rack-action-btn" title="Save project session">
+                          <span class="action-icon">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                              <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                              <polyline points="7 3 7 8 15 8"></polyline>
+                            </svg>
+                          </span>
+                        </button>
+                        <div class="tile-value">0</div>
+                      </div>
+                      <div class="param-tile" data-tile="session-open">
+                        <div class="tile-header">OPEN</div>
+                        <button id="sessionOpenBtn" class="rack-action-btn" title="Open project session">
+                          <span class="action-icon">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                            </svg>
+                          </span>
+                        </button>
+                        <div class="tile-value">0</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="utility-section">
+                    <div class="rack-header">MIDI ENGINE</div>
+                    <div class="param-grid-3col">
                       <div class="param-tile" data-tile="midi-learn">
                         <div class="tile-header">LEARN</div>
                         <div class="knob toggle-switch-knob" data-knob="midi-learn" data-tooltip="Enable MIDI learn mode"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
                         <div class="tile-value" data-val="midi-learn">OFF</div>
+                      </div>
+                      <div class="param-tile" data-tile="midi-keys">
+                        <div class="tile-header">KEYS</div>
+                        <div class="knob toggle-switch-knob" data-knob="midi-keys" data-tooltip="Play active pad from unmapped MIDI notes (pitch + velocity)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                        <div class="tile-value" data-val="midi-keys">OFF</div>
                       </div>
                       <div class="param-tile" data-tile="midi-clear">
                         <div class="tile-header">CLEAR</div>
@@ -669,6 +704,9 @@
           </div>
         </div>
         <div class="modal-actions" style="margin-top: 16px; display: flex; justify-content: flex-end; gap: 8px;">
+          <button id="padEditDuplicate" class="btn" aria-label="Duplicate this pad">Duplicate</button>
+          <button id="padEditRandomize" class="btn" aria-label="Randomize pad sound">Randomize</button>
+          <button id="padEditLoadAudio" class="btn" aria-label="Load audio for this pad only">Pad audio</button>
           <button id="padEditDelete" class="btn btn-danger" aria-label="Delete this pad" style="margin-right: auto;">Delete Pad</button>
           <button id="padEditCancel" class="btn">Cancel</button>
           <button id="padEditSave" class="btn primary">Save</button>

@@ -970,6 +970,14 @@
   line-height: 1.2;
 }
 
+#delaySyncLabel {
+  cursor: pointer;
+}
+
+#delaySyncLabel.is-synced {
+  color: var(--accent);
+}
+
 .tile-value {
   display: block;
   font-family: 'DM Mono', monospace;

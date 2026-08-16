@@ -1,9 +1,9 @@
 use wasm_bindgen::prelude::*;
 
 mod dsp;
-use dsp::{BiquadFilter, DelayLine, Reverb};
+use dsp::{read_region_hermite, BiquadFilter, DelayLine, Reverb, StereoLimiter};
+use std::f32::consts::PI;
 
-// Simple Xorshift RNG
 struct Rng {
     state: u32,
 }
@@ -23,7 +23,9 @@ impl Rng {
     }
 }
 
-// Struttura Grain interna con precisione f64 per evitare perdita di precisione su campioni grandi
+const GRAIN_PAN_WIDTH: f32 = 0.45;
+const REF_OVERLAP: f32 = 15.0 * 0.08;
+
 #[derive(Clone, Copy)]
 struct Grain {
     active: bool,
@@ -32,8 +34,8 @@ struct Grain {
     age: f64,
     attack: f32,
     release: f32,
-    inv_attack: f32,
-    inv_release: f32,
+    pan_l: f32,
+    pan_r: f32,
 }
 
 impl Grain {
@@ -45,31 +47,47 @@ impl Grain {
             age: 0.0,
             attack: 0.2,
             release: 0.25,
-            inv_attack: 5.0,
-            inv_release: 4.0,
+            pan_l: 0.707,
+            pan_r: 0.707,
         }
     }
 
-    fn init(&mut self, start: f64, length: f64, tight: bool) {
+    fn init(&mut self, start: f64, length: f64, tight: bool, pan: f32) {
         let length_f = length as f32;
-        let attack = if tight {
-            (3.0 / length_f).min(0.04)
-        } else {
-            0.2f32.min(10.0 / length_f)
-        };
-        let release = 0.25f32.min(12.0 / length_f);
+        let min_samples = if tight { 32.0 } else { 64.0 };
+        let min_frac = (min_samples / length_f.max(1.0)).min(0.45);
+        let mut attack = min_frac.max(0.2f32.min(10.0 / length_f.max(1.0)));
+        let mut release = min_frac.max(0.25f32.min(12.0 / length_f.max(1.0)));
+        if attack + release > 0.95 {
+            let s = 0.95 / (attack + release);
+            attack *= s;
+            release *= s;
+        }
+        let angle = (pan.clamp(-1.0, 1.0) + 1.0) * 0.25 * PI;
         self.active = true;
         self.start_sample = start;
         self.length = length;
         self.age = 0.0;
         self.attack = attack;
         self.release = release;
-        self.inv_attack = 1.0 / attack.max(1e-6);
-        self.inv_release = 1.0 / release.max(1e-6);
+        self.pan_l = angle.cos();
+        self.pan_r = angle.sin();
+    }
+
+    fn amp(&self) -> f32 {
+        let env_pos = (self.age / self.length) as f32;
+        if env_pos < self.attack {
+            let t = (env_pos / self.attack.max(1e-6)).clamp(0.0, 1.0);
+            0.5 - 0.5 * (PI * t).cos()
+        } else if env_pos > 1.0 - self.release {
+            let t = ((1.0 - env_pos) / self.release.max(1e-6)).clamp(0.0, 1.0);
+            0.5 - 0.5 * (PI * t).cos()
+        } else {
+            1.0
+        }
     }
 }
 
-// Helper per allocare memoria da JS
 #[wasm_bindgen]
 pub fn alloc(len: usize) -> *mut f32 {
     let mut buf = Vec::with_capacity(len);
@@ -78,7 +96,6 @@ pub fn alloc(len: usize) -> *mut f32 {
     ptr
 }
 
-// 64 covers density 60 × 200 ms (~12) plus marker bursts (up to 32) with headroom.
 const MAX_GRAINS: usize = 64;
 
 #[wasm_bindgen]
@@ -91,7 +108,6 @@ pub struct GranularEngine {
     free: [u16; MAX_GRAINS],
     free_count: usize,
 
-    // Params
     grain_size_ms: f32,
     density: f32,
     random_start_ms: f32,
@@ -101,17 +117,21 @@ pub struct GranularEngine {
     current_rate: f64,
     pitch_smooth_alpha: f64,
 
-    // Effects
-    filter: BiquadFilter,
-    delay: DelayLine,
+    filter_l: BiquadFilter,
+    filter_r: BiquadFilter,
+    delay_l: DelayLine,
+    delay_r: DelayLine,
     reverb: Reverb,
+    limiter: StereoLimiter,
 
-    // Effect Params
     delay_mix: f32,
     delay_feedback: f32,
     delay_time_ms: f32,
     reverb_mix: f32,
+    reverb_room: f32,
+    reverb_damp: f32,
     master_gain: f32,
+    overlap_comp: f32,
 
     cutoff_target: f32,
     cutoff_current: f32,
@@ -121,7 +141,10 @@ pub struct GranularEngine {
     delay_feedback_target: f32,
     delay_mix_target: f32,
     reverb_mix_target: f32,
+    reverb_room_target: f32,
+    reverb_damp_target: f32,
     master_gain_target: f32,
+    overlap_comp_target: f32,
     fx_smooth_alpha: f32,
     delay_time_alpha: f32,
     region_alpha: f64,
@@ -131,7 +154,6 @@ pub struct GranularEngine {
     region_start_f: f64,
     region_end_f: f64,
 
-    // State
     time_since_last_grain: f32,
     region_start: usize,
     region_end: usize,
@@ -150,6 +172,11 @@ fn make_index_range() -> [u16; MAX_GRAINS] {
         i += 1;
     }
     ids
+}
+
+fn overlap_compensation(density: f32, grain_size_ms: f32) -> f32 {
+    let overlap = density.max(0.1) * (grain_size_ms / 1000.0).max(0.001);
+    (REF_OVERLAP / overlap.max(REF_OVERLAP)).sqrt()
 }
 
 #[wasm_bindgen]
@@ -172,17 +199,23 @@ impl GranularEngine {
             target_pitch_semitones: 0.0,
             current_pitch_semitones: 0.0,
             current_rate: 1.0,
-            pitch_smooth_alpha: 1.0 - (-1.0 / (0.045 * sample_rate as f64)).exp(), // ~45ms portamento glide
+            pitch_smooth_alpha: 1.0 - (-1.0 / (0.045 * sample_rate as f64)).exp(),
 
-            filter: BiquadFilter::new(sample_rate),
-            delay: DelayLine::new(2000.0, sample_rate), // 2s max delay
+            filter_l: BiquadFilter::new(sample_rate),
+            filter_r: BiquadFilter::new(sample_rate),
+            delay_l: DelayLine::new(2000.0, sample_rate),
+            delay_r: DelayLine::new(2000.0, sample_rate),
             reverb: Reverb::new(sample_rate),
+            limiter: StereoLimiter::new(sample_rate),
 
             delay_mix: 0.0,
             delay_feedback: 0.3,
             delay_time_ms: 250.0,
             reverb_mix: 0.0,
+            reverb_room: 0.5,
+            reverb_damp: 0.5,
             master_gain: 1.0,
+            overlap_comp: 1.0,
 
             cutoff_target: 4000.0,
             cutoff_current: 4000.0,
@@ -192,7 +225,10 @@ impl GranularEngine {
             delay_feedback_target: 0.3,
             delay_mix_target: 0.0,
             reverb_mix_target: 0.0,
+            reverb_room_target: 0.5,
+            reverb_damp_target: 0.5,
             master_gain_target: 1.0,
+            overlap_comp_target: 1.0,
             fx_smooth_alpha: 1.0 - (-1.0 / (0.012 * sample_rate)).exp(),
             delay_time_alpha: 1.0 - (-1.0 / (0.02 * sample_rate)).exp(),
             region_alpha: 1.0 - (-1.0 / (0.025 * sample_rate as f64)).exp(),
@@ -213,7 +249,6 @@ impl GranularEngine {
         }
     }
 
-    // Metodi interni non esposti direttamente (usiamo i wrapper statici sotto)
     fn set_buffer_internal(&mut self, buffer_ptr: *const f32, len: usize) {
         let slice = unsafe { std::slice::from_raw_parts(buffer_ptr, len) };
         self.audio_buffer = slice.to_vec();
@@ -253,6 +288,7 @@ impl GranularEngine {
         self.random_start_ms = random_start_ms;
         self.pitch_semitones = pitch_semitones;
         self.target_pitch_semitones = pitch_semitones as f64;
+        self.overlap_comp_target = overlap_compensation(self.density, self.grain_size_ms);
     }
 
     fn set_effect_params_internal(
@@ -263,6 +299,8 @@ impl GranularEngine {
         delay_feedback: f32,
         delay_mix: f32,
         reverb_mix: f32,
+        reverb_room: f32,
+        reverb_damp: f32,
         master_gain: f32,
     ) {
         self.cutoff_target = cutoff;
@@ -271,7 +309,19 @@ impl GranularEngine {
         self.delay_feedback_target = delay_feedback.clamp(0.0, 0.95);
         self.delay_mix_target = delay_mix.clamp(0.0, 1.0);
         self.reverb_mix_target = reverb_mix.clamp(0.0, 1.0);
+        self.reverb_room_target = reverb_room.clamp(0.0, 1.0);
+        self.reverb_damp_target = reverb_damp.clamp(0.0, 1.0);
         self.master_gain_target = master_gain.max(0.0);
+    }
+
+    fn apply_filter_params(&mut self) {
+        self.filter_l.set_params(self.cutoff_current, self.q_current);
+        self.filter_r.set_params(self.cutoff_current, self.q_current);
+    }
+
+    fn apply_reverb_params(&mut self) {
+        self.reverb
+            .set_params(self.reverb_mix, self.reverb_room, self.reverb_damp);
     }
 
     fn snap_effect_params(&mut self) {
@@ -281,9 +331,12 @@ impl GranularEngine {
         self.delay_feedback = self.delay_feedback_target;
         self.delay_mix = self.delay_mix_target;
         self.reverb_mix = self.reverb_mix_target;
+        self.reverb_room = self.reverb_room_target;
+        self.reverb_damp = self.reverb_damp_target;
         self.master_gain = self.master_gain_target;
-        self.filter.set_params(self.cutoff_current, self.q_current);
-        self.reverb.set_params(self.reverb_mix, 0.5, 0.5);
+        self.overlap_comp = self.overlap_comp_target;
+        self.apply_filter_params();
+        self.apply_reverb_params();
     }
 
     fn smooth_toward(current: f32, target: f32, alpha: f32, eps: f32) -> f32 {
@@ -306,7 +359,7 @@ impl GranularEngine {
             self.cutoff_current = (log_c + (log_t - log_c) * self.fx_smooth_alpha).exp();
         }
         self.q_current = Self::smooth_toward(self.q_current, self.q_target, self.fx_smooth_alpha, 0.001);
-        self.filter.set_params(self.cutoff_current, self.q_current);
+        self.apply_filter_params();
 
         self.delay_time_ms = Self::smooth_toward(
             self.delay_time_ms,
@@ -326,19 +379,44 @@ impl GranularEngine {
             self.fx_smooth_alpha,
             1e-4,
         );
+
         let new_reverb = Self::smooth_toward(
             self.reverb_mix,
             self.reverb_mix_target,
             self.fx_smooth_alpha,
             1e-4,
         );
-        if (new_reverb - self.reverb_mix).abs() > 1e-6 {
+        let new_room = Self::smooth_toward(
+            self.reverb_room,
+            self.reverb_room_target,
+            self.fx_smooth_alpha,
+            1e-4,
+        );
+        let new_damp = Self::smooth_toward(
+            self.reverb_damp,
+            self.reverb_damp_target,
+            self.fx_smooth_alpha,
+            1e-4,
+        );
+        if (new_reverb - self.reverb_mix).abs() > 1e-6
+            || (new_room - self.reverb_room).abs() > 1e-6
+            || (new_damp - self.reverb_damp).abs() > 1e-6
+        {
             self.reverb_mix = new_reverb;
-            self.reverb.set_params(self.reverb_mix, 0.5, 0.5);
+            self.reverb_room = new_room;
+            self.reverb_damp = new_damp;
+            self.apply_reverb_params();
         }
+
         self.master_gain = Self::smooth_toward(
             self.master_gain,
             self.master_gain_target,
+            self.fx_smooth_alpha,
+            1e-4,
+        );
+        self.overlap_comp = Self::smooth_toward(
+            self.overlap_comp,
+            self.overlap_comp_target,
             self.fx_smooth_alpha,
             1e-4,
         );
@@ -361,7 +439,6 @@ impl GranularEngine {
         self.region_end = end;
     }
 
-    // Metodo unificato per aggiornare tutto lo stato (preset recall optimization)
     fn set_all_params_internal(
         &mut self,
         grain_size_ms: f32,
@@ -374,6 +451,8 @@ impl GranularEngine {
         delay_feedback: f32,
         delay_mix: f32,
         reverb_mix: f32,
+        reverb_room: f32,
+        reverb_damp: f32,
         master_gain: f32,
         region_start: usize,
         region_end: usize,
@@ -386,6 +465,8 @@ impl GranularEngine {
             delay_feedback,
             delay_mix,
             reverb_mix,
+            reverb_room,
+            reverb_damp,
             master_gain,
         );
         self.snap_effect_params();
@@ -394,7 +475,6 @@ impl GranularEngine {
 
     fn set_playing_internal(&mut self, playing: bool) {
         self.is_playing = playing;
-        // Keeping ringing on stop is nicer
     }
 
     fn update_pitch_rate(&mut self) {
@@ -410,57 +490,34 @@ impl GranularEngine {
         self.current_rate = 2.0f64.powf(self.current_pitch_semitones / 12.0);
     }
 
-    fn mix_active_grains(&mut self, current_rate: f64, buf_len: usize) -> f32 {
+    fn mix_active_grains(&mut self, current_rate: f64) -> (f32, f32) {
         if self.active_count == 0 {
-            return 0.0;
+            return (0.0, 0.0);
         }
 
         let reg_start = self.region_start;
         let reg_end = self.region_end.max(reg_start + 1);
-        let reg_len = reg_end - reg_start;
-        let mut current_sample = 0.0;
+        let mut mix_l = 0.0;
+        let mut mix_r = 0.0;
         let mut i = 0;
 
         while i < self.active_count {
             let gi = self.active[i] as usize;
-            let (amp, start_sample, age, length) = {
+            let (amp, start_sample, age, length, pan_l, pan_r) = {
                 let g = &self.grains[gi];
-                let env_pos = (g.age / g.length) as f32;
-                let amp = if env_pos < g.attack {
-                    env_pos * g.inv_attack
-                } else if env_pos > 1.0 - g.release {
-                    (1.0 - env_pos) * g.inv_release
-                } else {
-                    1.0
-                };
-                (amp, g.start_sample, g.age, g.length)
+                (g.amp(), g.start_sample, g.age, g.length, g.pan_l, g.pan_r)
             };
 
-            let raw_pos = start_sample.floor() as usize;
-            let rel_pos = if raw_pos >= reg_start {
-                raw_pos - reg_start
-            } else {
-                0
-            };
-            let clamped_pos = reg_start + (rel_pos % reg_len);
-            let next_pos = reg_start + ((rel_pos + 1) % reg_len);
-            let frac = (start_sample - start_sample.floor()) as f32;
+            let s = read_region_hermite(&self.audio_buffer, start_sample, reg_start, reg_end);
+            let g = s * amp;
+            mix_l += g * pan_l;
+            mix_r += g * pan_r;
 
-            let s = if clamped_pos < buf_len && next_pos < buf_len {
-                let s1 = self.audio_buffer[clamped_pos];
-                let s2 = self.audio_buffer[next_pos];
-                s1 + (s2 - s1) * frac
-            } else {
-                0.0
-            };
-
-            current_sample += s * amp;
-
-            let g = &mut self.grains[gi];
-            g.start_sample = start_sample + current_rate;
-            g.age = age + 1.0;
-            if g.age >= length {
-                g.active = false;
+            let grain = &mut self.grains[gi];
+            grain.start_sample = start_sample + current_rate;
+            grain.age = age + 1.0;
+            if grain.age >= length {
+                grain.active = false;
                 self.active_count -= 1;
                 self.active[i] = self.active[self.active_count];
                 self.free[self.free_count] = gi as u16;
@@ -470,11 +527,12 @@ impl GranularEngine {
             }
         }
 
-        current_sample
+        (mix_l, mix_r)
     }
 
-    fn process_internal(&mut self, output_ptr: *mut f32, len: usize) {
-        let output = unsafe { std::slice::from_raw_parts_mut(output_ptr, len) };
+    fn process_internal(&mut self, output_l_ptr: *mut f32, output_r_ptr: *mut f32, len: usize) {
+        let output_l = unsafe { std::slice::from_raw_parts_mut(output_l_ptr, len) };
+        let output_r = unsafe { std::slice::from_raw_parts_mut(output_r_ptr, len) };
 
         let density = self.density.max(0.1);
         let interval_samples = self.sample_rate / density;
@@ -489,6 +547,7 @@ impl GranularEngine {
             let delay_fb = self.delay_feedback;
             let delay_time = self.delay_time_ms;
             let master_gain = self.master_gain;
+            let overlap = self.overlap_comp;
 
             if can_spawn {
                 self.time_since_last_grain += 1.0;
@@ -498,21 +557,32 @@ impl GranularEngine {
                 }
             }
 
-            let current_sample = if buf_len > 0 {
-                self.mix_active_grains(current_rate, buf_len)
+            let (mut mix_l, mut mix_r) = if buf_len > 0 {
+                self.mix_active_grains(current_rate)
             } else {
-                0.0
+                (0.0, 0.0)
             };
+            mix_l *= overlap;
+            mix_r *= overlap;
 
-            let filtered = self.filter.process(current_sample);
+            let filt_l = self.filter_l.process(mix_l);
+            let filt_r = self.filter_r.process(mix_r);
 
-            let delayed_sig = self.delay.read(delay_time);
-            let delay_in = filtered + (delayed_sig * delay_fb);
-            self.delay.write(delay_in);
+            let delayed_l = self.delay_l.read(delay_time);
+            let delayed_r = self.delay_r.read(delay_time);
+            self.delay_l.write(filt_l + delayed_l * delay_fb);
+            self.delay_r.write(filt_r + delayed_r * delay_fb);
 
-            let delay_out = filtered * (1.0 - delay_mix) + delayed_sig * delay_mix;
-            let reverb_out = self.reverb.process(delay_out);
-            output[i] = reverb_out * master_gain;
+            let dry = 1.0 - delay_mix;
+            let delay_out_l = filt_l * dry + delayed_l * delay_mix;
+            let delay_out_r = filt_r * dry + delayed_r * delay_mix;
+
+            let (rev_l, rev_r) = self.reverb.process(delay_out_l, delay_out_r);
+            let (lim_l, lim_r) = self
+                .limiter
+                .process(rev_l * master_gain, rev_r * master_gain);
+            output_l[i] = lim_l;
+            output_r[i] = lim_r;
         }
     }
 
@@ -562,16 +632,15 @@ impl GranularEngine {
         }
 
         let length = ((self.grain_size_ms / 1000.0) as f64 * (self.sample_rate as f64)).max(1.0);
+        let pan = (self.rng.next_f32() * 2.0 - 1.0) * GRAIN_PAN_WIDTH;
 
         self.free_count -= 1;
         let gi = self.free[self.free_count] as usize;
-        self.grains[gi].init(start, length, tight);
+        self.grains[gi].init(start, length, tight, pan);
         self.active[self.active_count] = gi as u16;
         self.active_count += 1;
     }
 }
-
-// --- FUNZIONI STATICHE WRAPPER (Per export sicuro) ---
 
 #[wasm_bindgen]
 pub fn granularengine_set_buffer(engine: &mut GranularEngine, ptr: *const f32, len: usize) {
@@ -603,6 +672,8 @@ pub fn granularengine_set_effect_params(
     delay_feedback: f32,
     delay_mix: f32,
     reverb_mix: f32,
+    reverb_room: f32,
+    reverb_damp: f32,
     master_gain: f32,
 ) {
     engine.set_effect_params_internal(
@@ -612,6 +683,8 @@ pub fn granularengine_set_effect_params(
         delay_feedback,
         delay_mix,
         reverb_mix,
+        reverb_room,
+        reverb_damp,
         master_gain,
     );
 }
@@ -629,6 +702,8 @@ pub fn granularengine_set_all_params(
     delay_feedback: f32,
     delay_mix: f32,
     reverb_mix: f32,
+    reverb_room: f32,
+    reverb_damp: f32,
     master_gain: f32,
     region_start: usize,
     region_end: usize,
@@ -644,6 +719,8 @@ pub fn granularengine_set_all_params(
         delay_feedback,
         delay_mix,
         reverb_mix,
+        reverb_room,
+        reverb_damp,
         master_gain,
         region_start,
         region_end,
@@ -671,6 +748,11 @@ pub fn granularengine_spawn_now(engine: &mut GranularEngine, count: u32) {
 }
 
 #[wasm_bindgen]
-pub fn granularengine_process(engine: &mut GranularEngine, output_ptr: *mut f32, len: usize) {
-    engine.process_internal(output_ptr, len);
+pub fn granularengine_process(
+    engine: &mut GranularEngine,
+    output_l_ptr: *mut f32,
+    output_r_ptr: *mut f32,
+    len: usize,
+) {
+    engine.process_internal(output_l_ptr, output_r_ptr, len);
 }

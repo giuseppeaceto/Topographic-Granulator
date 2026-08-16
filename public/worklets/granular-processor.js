@@ -1,3 +1,16 @@
+function downmixToMono(channels) {
+  const ch0 = channels && channels[0];
+  if (!ch0) return new Float32Array(0);
+  if (!channels[1] || channels[1].length === 0) return ch0;
+  const n = Math.min(ch0.length, channels[1].length);
+  const mono = new Float32Array(n);
+  const ch1 = channels[1];
+  for (let i = 0; i < n; i++) {
+    mono[i] = (ch0[i] + ch1[i]) * 0.5;
+  }
+  return mono;
+}
+
 // WASM-only Audio Processor for Undergrain
 class GranularProcessor extends AudioWorkletProcessor {
   constructor() {
@@ -21,7 +34,8 @@ class GranularProcessor extends AudioWorkletProcessor {
     this.wasmInstance = null;
     this.wasmEnginePtr = null; 
     this.wasmMemory = null;
-    this.wasmOutputPtr = null; 
+    this.wasmOutputPtrL = null;
+    this.wasmOutputPtrR = null;
     this.wasmOutputLen = 0;
     this.heapF32 = null;
     this.heapBuffer = null;
@@ -117,12 +131,11 @@ class GranularProcessor extends AudioWorkletProcessor {
           this.port.postMessage({ type: 'wasmError', error: String(err && err.message ? err.message : err) });
         }
       } else if (msg?.type === 'setBuffer') {
-        // Se WASM c'è, invia subito. Altrimenti salva per dopo.
-        const ch0 = msg.channels[0];
+        const mono = downmixToMono(msg.channels);
         if (this.useWasm && this.wasmInstance) {
-             this.sendBufferToWasm(ch0);
+             this.sendBufferToWasm(mono);
         } else {
-             this.pendingBuffer = ch0;
+             this.pendingBuffer = mono;
         }
 
       } else if (msg?.type === 'setRegion') {
@@ -160,6 +173,8 @@ class GranularProcessor extends AudioWorkletProcessor {
                 p.delayFeedback ?? 0,
                 p.delayMix ?? 0,
                 p.reverbMix ?? 0,
+                p.reverbRoom ?? 0.5,
+                p.reverbDamp ?? 0.5,
                 p.masterGain ?? 1.0
              );
         }
@@ -180,7 +195,8 @@ class GranularProcessor extends AudioWorkletProcessor {
             this.wasmInstance.exports.granularengine_set_all_params(
                 this.wasmEnginePtr,
                 d.grainSizeMs, d.density, d.randomStartMs, d.pitchSemitones,
-                d.filterCutoffHz, d.filterQ, d.delayTimeMs, d.delayFeedback, d.delayMix, d.reverbMix, d.masterGain,
+                d.filterCutoffHz, d.filterQ, d.delayTimeMs, d.delayFeedback, d.delayMix,
+                d.reverbMix, d.reverbRoom ?? 0.5, d.reverbDamp ?? 0.5, d.masterGain,
                 this.regionStart, this.regionEnd
             );
         }
@@ -240,19 +256,29 @@ class GranularProcessor extends AudioWorkletProcessor {
     if (this.useWasm && this.wasmEnginePtr && this.wasmInstance) {
         const exports = this.wasmInstance.exports;
         
-        if (!this.wasmOutputPtr || this.wasmOutputLen !== frames) {
-            this.wasmOutputPtr = exports.alloc(frames);
+        if (!this.wasmOutputPtrL || !this.wasmOutputPtrR || this.wasmOutputLen !== frames) {
+            this.wasmOutputPtrL = exports.alloc(frames);
+            this.wasmOutputPtrR = exports.alloc(frames);
             this.wasmOutputLen = frames;
             this.heapF32 = null;
         }
         
-        exports.granularengine_process(this.wasmEnginePtr, this.wasmOutputPtr, frames);
+        exports.granularengine_process(
+            this.wasmEnginePtr,
+            this.wasmOutputPtrL,
+            this.wasmOutputPtrR,
+            frames
+        );
         
         const wasmHeap = this.heapView();
-        const result = wasmHeap.subarray(this.wasmOutputPtr / 4, this.wasmOutputPtr / 4 + frames);
-        output[0].set(result);
-        for (let ch = 1; ch < numChannels; ch++) {
-            output[ch].set(output[0]);
+        const left = wasmHeap.subarray(this.wasmOutputPtrL / 4, this.wasmOutputPtrL / 4 + frames);
+        const right = wasmHeap.subarray(this.wasmOutputPtrR / 4, this.wasmOutputPtrR / 4 + frames);
+        output[0].set(left);
+        if (numChannels > 1) {
+            output[1].set(right);
+            for (let ch = 2; ch < numChannels; ch++) {
+                output[ch].set(output[ch & 1]);
+            }
         }
         
         return true;

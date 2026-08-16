@@ -1,7 +1,7 @@
 export type Region = { start: number; end: number; name?: string; iconIndex?: number };
 
-export function createRegionStore(size: number) {
-	const pads: Array<Region | null> = new Array(size).fill(null);
+export function createRegionStore(initialSize: number) {
+	const pads: Array<Region | null> = new Array(initialSize).fill(null);
 
 	function get(index: number): Region | null {
 		return pads[index] ?? null;
@@ -21,7 +21,13 @@ export function createRegionStore(size: number) {
 	function size() {
 		return pads.length;
 	}
-	return { get, set, getAll, add, remove, size };
+	function replaceAll(next: Array<Region | null>) {
+		pads.length = 0;
+		for (const r of next) {
+			pads.push(r ? { ...r } : null);
+		}
+	}
+	return { get, set, getAll, add, remove, size, replaceAll };
 }
 
 

@@ -6,6 +6,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // File operations
   showOpenDialog: (options) => ipcRenderer.invoke('show-open-dialog', options),
   showSaveDialog: (options) => ipcRenderer.invoke('show-save-dialog', options),
+  writeTextFile: (filePath, contents) => ipcRenderer.invoke('write-text-file', filePath, contents),
+  readTextFile: (filePath) => ipcRenderer.invoke('read-text-file', filePath),
+  writeBinaryFile: (filePath, bytes) => ipcRenderer.invoke('write-binary-file', filePath, bytes),
+  readBinaryFile: (filePath) => ipcRenderer.invoke('read-binary-file', filePath),
+  copyFile: (src, dest) => ipcRenderer.invoke('copy-file', src, dest),
   getDesktopSources: () => ipcRenderer.invoke('get-desktop-sources'),
   
   // Update events

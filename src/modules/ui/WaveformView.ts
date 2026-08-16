@@ -426,6 +426,7 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 		}
 
 		if (markerHit) {
+			events.onGestureStart?.();
 			dragging = true;
 			dragMode = 'marker';
 			dragMarkerId = markerHit.id;
@@ -451,6 +452,7 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 
 		dragging = true;
 		dragStartX = x;
+		events.onGestureStart?.();
 		if (selection && overLeft) {
 			dragMode = 'resize-left';
 		} else if (selection && overRight) {
@@ -553,11 +555,18 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 	function onPointerUp(ev: PointerEvent) {
 		if (!buffer) return;
 		if (dragging) {
+			const mode = dragMode;
 			dragging = false;
 			dragMode = null;
 			dragMarkerId = null;
 			canvas.releasePointerCapture(ev.pointerId);
 			canvas.style.cursor = 'default';
+			if (mode === 'create' || mode === 'resize-left' || mode === 'resize-right' || mode === 'move') {
+				events.onSelectionCommit?.(selection);
+			}
+			if (mode === 'marker') {
+				events.onMarkersCommit?.(markers);
+			}
 		}
 	}
 
@@ -567,8 +576,11 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 	canvas.addEventListener('pointerleave', onPointerUp);
 
 	const events: {
+		onGestureStart?: () => void;
 		onSelection?: (sel: WaveformSelection | null) => void;
+		onSelectionCommit?: (sel: WaveformSelection | null) => void;
 		onMarkersChange?: (markers: Marker[]) => void;
+		onMarkersCommit?: (markers: Marker[]) => void;
 		onMarkerSelect?: (id: string | null) => void;
 	} = {};
 
@@ -577,7 +589,10 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 		setSelection,
 		clearSelection,
 		getSelection: () => selection,
+		onGestureStart: (cb: () => void) => (events.onGestureStart = cb),
 		onSelection: (cb: (sel: WaveformSelection | null) => void) => (events.onSelection = cb),
+		onSelectionCommit: (cb: (sel: WaveformSelection | null) => void) => (events.onSelectionCommit = cb),
+		onMarkersCommit: (cb: (markers: Marker[]) => void) => (events.onMarkersCommit = cb),
 		forceRedraw: draw,
 		setScale: (scale: number) => {
 			drawScale = scale;

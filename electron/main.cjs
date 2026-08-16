@@ -594,6 +594,37 @@ ipcMain.handle('show-save-dialog', async (event, options) => {
   return result;
 });
 
+ipcMain.handle('write-text-file', async (event, filePath, contents) => {
+  const fs = require('fs');
+  fs.writeFileSync(filePath, contents, 'utf8');
+  return { ok: true };
+});
+
+ipcMain.handle('read-text-file', async (event, filePath) => {
+  const fs = require('fs');
+  if (!fs.existsSync(filePath)) return { ok: false, error: 'File not found' };
+  return { ok: true, data: fs.readFileSync(filePath, 'utf8') };
+});
+
+ipcMain.handle('write-binary-file', async (event, filePath, bytes) => {
+  const fs = require('fs');
+  fs.writeFileSync(filePath, Buffer.from(bytes));
+  return { ok: true };
+});
+
+ipcMain.handle('read-binary-file', async (event, filePath) => {
+  const fs = require('fs');
+  if (!fs.existsSync(filePath)) return { ok: false, error: 'File not found' };
+  return { ok: true, data: Uint8Array.from(fs.readFileSync(filePath)) };
+});
+
+ipcMain.handle('copy-file', async (event, src, dest) => {
+  const fs = require('fs');
+  if (!src || !fs.existsSync(src)) return { ok: false, error: 'Source not found' };
+  fs.copyFileSync(src, dest);
+  return { ok: true };
+});
+
 ipcMain.handle('get-desktop-sources', async (event) => {
   const sources = await desktopCapturer.getSources({ types: ['screen'] });
   // Serialize sources to avoid "object could not be cloned" error if any

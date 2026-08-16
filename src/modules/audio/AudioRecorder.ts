@@ -1,4 +1,5 @@
 import { logger } from '../utils/logger';
+import { encodeWav } from './wavEncoder';
 
 export type AudioRecorder = {
 	start: (withVideo?: boolean) => Promise<void>;
@@ -72,54 +73,8 @@ export function createAudioRecorder(
 	const sampleRate = audioContext.sampleRate;
 	const numberOfChannels = 2; // Stereo
 
-	// Convert Float32Array to 16-bit PCM
-	function floatTo16BitPCM(float32Array: Float32Array): Int16Array {
-		const int16Array = new Int16Array(float32Array.length);
-		for (let i = 0; i < float32Array.length; i++) {
-			const s = Math.max(-1, Math.min(1, float32Array[i]));
-			int16Array[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-		}
-		return int16Array;
-	}
-
-	// Convert interleaved PCM data to WAV format
 	function encodeWAV(samples: Float32Array[], sampleRate: number, numChannels: number): ArrayBuffer {
-		const length = samples[0].length;
-		const buffer = new ArrayBuffer(44 + length * numChannels * 2);
-		const view = new DataView(buffer);
-
-		// WAV header
-		const writeString = (offset: number, string: string) => {
-			for (let i = 0; i < string.length; i++) {
-				view.setUint8(offset + i, string.charCodeAt(i));
-			}
-		};
-
-		writeString(0, 'RIFF');
-		view.setUint32(4, 36 + length * numChannels * 2, true);
-		writeString(8, 'WAVE');
-		writeString(12, 'fmt ');
-		view.setUint32(16, 16, true); // fmt chunk size
-		view.setUint16(20, 1, true); // audio format (1 = PCM)
-		view.setUint16(22, numChannels, true);
-		view.setUint32(24, sampleRate, true);
-		view.setUint32(28, sampleRate * numChannels * 2, true); // byte rate
-		view.setUint16(32, numChannels * 2, true); // block align
-		view.setUint16(34, 16, true); // bits per sample
-		writeString(36, 'data');
-		view.setUint32(40, length * numChannels * 2, true);
-
-		// Interleave and convert to 16-bit PCM
-		const pcmData = new Int16Array(buffer, 44);
-		for (let i = 0; i < length; i++) {
-			for (let ch = 0; ch < numChannels; ch++) {
-				const sample = samples[ch]?.[i] ?? 0;
-				const clamped = Math.max(-1, Math.min(1, sample));
-				pcmData[i * numChannels + ch] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7FFF;
-			}
-		}
-
-		return buffer;
+		return encodeWav(samples, sampleRate, numChannels, 24);
 	}
 
 	async function getScreenStream(): Promise<MediaStream> {

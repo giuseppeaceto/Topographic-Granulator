@@ -20,6 +20,8 @@ export type PadParams = {
 	xySpeed?: number; // Speed for keyboard arrow movement (normal)
     xyShift?: number; // Speed for keyboard arrow movement with Shift key
 	markerSeq: MarkerSeqParams;
+	/** Shared project sample (default) or a file assigned only to this pad. */
+	audioSource?: { kind: 'shared' } | { kind: 'file'; name: string };
 };
 
 export function defaultGranular(): GranularParams {
@@ -32,11 +34,11 @@ export function defaultGranular(): GranularParams {
 }
 
 export function defaultEffects(): EffectsParams {
-	return { filterCutoffHz: 4000, filterQ: 0.707, delayTimeSec: 0.25, delayMix: 0.15, delayFeedback: 0.3, reverbMix: 0.2, masterGain: 0.9, reverbRoom: 0.5, reverbDamp: 0.5 };
+	return { filterCutoffHz: 4000, filterQ: 0.707, delayTimeSec: 0.25, delayMix: 0.15, delayFeedback: 0.3, reverbMix: 0.2, masterGain: 0.9, reverbRoom: 0.5, reverbDamp: 0.5, delaySync: false };
 }
 
-export function createPadParamStore(size: number) {
-	const store: PadParams[] = new Array(size).fill(0).map(() => ({
+export function createPadParamStore(initialSize: number) {
+	const store: PadParams[] = new Array(initialSize).fill(0).map(() => ({
 		granular: defaultGranular(),
 		effects: defaultEffects(),
 		xy: { x: 0.5, y: 0.5 },
@@ -63,7 +65,8 @@ export function createPadParamStore(size: number) {
             xyShift: params.xyShift !== undefined ? params.xyShift : (current.xyShift ?? 0.05),
 			markerSeq: params.markerSeq
 				? mergeMarkerSeq(current.markerSeq ?? defaultMarkerSeq(), params.markerSeq)
-				: (current.markerSeq ?? defaultMarkerSeq())
+				: (current.markerSeq ?? defaultMarkerSeq()),
+			audioSource: params.audioSource !== undefined ? params.audioSource : current.audioSource
 		};
 	}
 	function setGranular(index: number, granular: Partial<GranularParams>) {
@@ -103,5 +106,14 @@ export function createPadParamStore(size: number) {
 	function size() {
 		return store.length;
 	}
-	return { get, set, setGranular, setEffects, setXY, setMotionPath, setMotionParams, setMarkerSeq, add, remove, size };
+	function cloneAll(): PadParams[] {
+		return store.map((p) => JSON.parse(JSON.stringify(p)) as PadParams);
+	}
+	function replaceAll(pads: PadParams[]) {
+		store.length = 0;
+		for (const p of pads) {
+			store.push(JSON.parse(JSON.stringify(p)) as PadParams);
+		}
+	}
+	return { get, set, setGranular, setEffects, setXY, setMotionPath, setMotionParams, setMarkerSeq, add, remove, size, cloneAll, replaceAll };
 }

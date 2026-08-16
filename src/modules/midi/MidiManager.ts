@@ -5,7 +5,11 @@ export type MidiMapping = {
 	targetId: string;   // e.g., 'knob:pitch' or 'pad:0'
 };
 
-export type MidiEvent = { type: 'cc' | 'noteon' | 'noteoff'; channel: number; num: number; value: number };
+export type MidiEvent =
+	| { type: 'cc' | 'noteon' | 'noteoff'; channel: number; num: number; value: number }
+	| { type: 'clock' }
+	| { type: 'clockstart' }
+	| { type: 'clockstop' };
 
 export class MidiManager {
 	private access: WebMidi.MIDIAccess | null = null;
@@ -35,7 +39,23 @@ export class MidiManager {
 	}
 
 	private handleMessage(message: WebMidi.MIDIMessageEvent) {
-		const [status, data1, data2] = message.data;
+		const data = message.data;
+		if (!data || data.length === 0) return;
+		const status = data[0];
+		if (status === 0xf8) {
+			this.emit({ type: 'clock' });
+			return;
+		}
+		if (status === 0xfa) {
+			this.emit({ type: 'clockstart' });
+			return;
+		}
+		if (status === 0xfc) {
+			this.emit({ type: 'clockstop' });
+			return;
+		}
+		const data1 = data[1] ?? 0;
+		const data2 = data[2] ?? 0;
 		const statusHigh = status & 0xf0;
 		const channel = (status & 0x0f) + 1;
 		if (statusHigh === 0xb0) {

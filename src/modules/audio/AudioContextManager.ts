@@ -1,7 +1,13 @@
 import { logger } from '../utils/logger';
 
 export function createAudioContextManager() {
-	const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+	const Ctor = window.AudioContext || (window as any).webkitAudioContext;
+	let audioContext: AudioContext;
+	try {
+		audioContext = new Ctor({ latencyHint: 'interactive' });
+	} catch {
+		audioContext = new Ctor();
+	}
 	let unlocked = audioContext.state === 'running';
 
 	// Listen for audio context state changes (e.g., suspended by browser)

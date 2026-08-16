@@ -8,6 +8,8 @@ export type EffectsParams = {
 	masterGain: number; // 0.. ~1.5
 	reverbRoom?: number;
 	reverbDamp?: number;
+	/** When true, delayTimeSec is interpreted as beats at the pad marker BPM. */
+	delaySync?: boolean;
 };
 
 export type EffectsChain = {

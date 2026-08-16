@@ -33,9 +33,10 @@ export type Voice = {
 	cornerMapping: { tl: string; tr: string; bl: string; br: string } | null;
     
     // Store region for selectionPos calculation
-    region: Region | null;
+	region: Region | null;
 	/** Live density overlay from marker bloom; null = use mapped/base density */
 	densityOverride: number | null;
+	lastAudioBuffer: AudioBuffer | null;
     
     // Store indices for real-time lookup (Pads Mode)
     padMorphIndices?: {
@@ -50,6 +51,7 @@ export class VoiceManager {
 	private voices: Voice[] = [];
 	private context: AudioContext;
 	private buffer: AudioBuffer | null = null;
+	private padBuffers = new Map<number, AudioBuffer>();
 	private maxVoices: number;
 	private nextVoiceId = 0;
 	private animationFrame: number | null = null;
@@ -87,7 +89,8 @@ export class VoiceManager {
                 lastSelectionPos: null,
 				cornerMapping: null,
                 region: null,
-				densityOverride: null
+				densityOverride: null,
+				lastAudioBuffer: null
 			});
 		}
         // Start the internal automation loop
@@ -317,12 +320,34 @@ export class VoiceManager {
 
 	async setBuffer(buffer: AudioBuffer) {
 		this.buffer = buffer;
-		// Update all voices (even inactive ones, so they are ready)
-		await Promise.all(this.voices.map(v => v.engine.setBuffer(buffer)));
+		await Promise.all(this.voices.map(async v => {
+			if (v.padIndex != null && this.padBuffers.has(v.padIndex)) return;
+			await v.engine.setBuffer(buffer);
+			v.lastAudioBuffer = buffer;
+		}));
+	}
+
+	async setBufferForPad(padIndex: number, buffer: AudioBuffer | null) {
+		if (buffer) this.padBuffers.set(padIndex, buffer);
+		else this.padBuffers.delete(padIndex);
+		const voice = this.getActiveVoiceForPad(padIndex);
+		const next = buffer ?? this.buffer;
+		if (voice && next && voice.lastAudioBuffer !== next) {
+			await voice.engine.setBuffer(next);
+			voice.lastAudioBuffer = next;
+		}
+	}
+
+	getBufferForPad(padIndex: number): AudioBuffer | null {
+		return this.padBuffers.get(padIndex) ?? this.buffer;
+	}
+
+	clearPadBuffer(padIndex: number) {
+		this.padBuffers.delete(padIndex);
 	}
 
 	// Trigger a voice for a specific pad
-	trigger(
+	async trigger(
 		padIndex: number, 
 		region: Region, 
 		granular: GranularParams, 
@@ -381,10 +406,16 @@ export class VoiceManager {
         voice.region = { ...region };
 
         // Reset dirty check cache on new trigger
-        voice.lastSentGranular = null;
+		voice.lastSentGranular = null;
         voice.lastSentFx = null;
         voice.lastSelectionPos = null;
 		voice.densityOverride = null;
+
+		const buf = this.padBuffers.get(padIndex) ?? this.buffer;
+		if (buf && voice.lastAudioBuffer !== buf) {
+			await voice.engine.setBuffer(buf);
+			voice.lastAudioBuffer = buf;
+		}
 
 		// Set initial params
         voice.engine.setParams(granular);
@@ -400,8 +431,10 @@ export class VoiceManager {
 
 	setVoiceGrainAnchor(padIndex: number, timeSec: number, enabled: boolean) {
 		const voice = this.getActiveVoiceForPad(padIndex);
-		if (!voice || !this.buffer) return;
-		const sample = Math.max(0, timeSec) * this.buffer.sampleRate;
+		if (!voice) return;
+		const buf = this.getBufferForPad(padIndex);
+		if (!buf) return;
+		const sample = Math.max(0, timeSec) * buf.sampleRate;
 		voice.engine.setGrainAnchor(sample, enabled);
 	}
 
@@ -557,6 +590,7 @@ export class VoiceManager {
         // Clear references
         this.voices = [];
         this.buffer = null;
+        this.padBuffers.clear();
         this.paramProvider = null;
     }
 
