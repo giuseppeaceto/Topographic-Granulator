@@ -54,12 +54,38 @@ type LaneState = {
 	bloomActive: boolean;
 	bloomStart: number;
 	bloomDur: number;
+	bloomPeak: number;
+	bloomFloor: number;
+	bloomAttack: number;
+	bloomMemory: number;
+	bloomShape: BloomShape;
+	bloomShapeExtra: number;
+	bloomShapeBag: BloomShape[];
 	playingId: string | null;
 	playingIndex: number;
 	fromIndex: number;
 	hitTime: number;
 	visitTrail: number[];
 };
+
+type BloomShape =
+	| 'swell'
+	| 'bell'
+	| 'late'
+	| 'crash'
+	| 'plateau'
+	| 'double'
+	| 'terrace'
+	| 'reverse'
+	| 'pulse'
+	| 'undulate'
+	| 'saw'
+	| 'inhale';
+
+const BLOOM_SHAPES: BloomShape[] = [
+	'swell', 'bell', 'late', 'crash', 'plateau', 'double',
+	'terrace', 'reverse', 'pulse', 'undulate', 'saw', 'inhale'
+];
 
 export type MarkerLaneVisual = {
 	running: boolean;
@@ -209,10 +235,142 @@ export function createMarkerSequencer(config: {
 		}
 	}
 
+	function refillBloomShapes(): BloomShape[] {
+		const bag = BLOOM_SHAPES.slice();
+		for (let i = bag.length - 1; i > 0; i--) {
+			const j = Math.floor(Math.random() * (i + 1));
+			[bag[i], bag[j]] = [bag[j], bag[i]];
+		}
+		return bag;
+	}
+
+	function pickBloomShape(lane: LaneState): BloomShape {
+		if (lane.bloomShapeBag.length === 0) {
+			lane.bloomShapeBag = refillBloomShapes();
+		}
+		if (Math.random() < 0.18) {
+			return BLOOM_SHAPES[Math.floor(Math.random() * BLOOM_SHAPES.length)];
+		}
+		return lane.bloomShapeBag.shift() ?? 'swell';
+	}
+
+	function easeSmooth(t: number): number {
+		const x = Math.max(0, Math.min(1, t));
+		return x * x * (3 - 2 * x);
+	}
+
+	function bloomShapeAmount(shape: BloomShape, p: number, attack: number, extra: number): number {
+		const t = Math.max(0, Math.min(1, p));
+		switch (shape) {
+			case 'bell': {
+				const mu = 0.32 + extra * 0.28;
+				const s = 0.14 + extra * 0.12;
+				return Math.exp(-0.5 * ((t - mu) / s) ** 2);
+			}
+			case 'late': {
+				const start = 0.42 + extra * 0.32;
+				if (t < start) return (t / start) * 0.1;
+				return easeSmooth((t - start) / Math.max(0.001, 1 - start));
+			}
+			case 'crash': {
+				const a = 0.05 + extra * 0.08;
+				if (t < a) return easeSmooth(t / a);
+				return Math.exp(-((t - a) / Math.max(0.001, 1 - a)) * (2.6 + extra * 2.2));
+			}
+			case 'plateau': {
+				const a = 0.1 + extra * 0.16;
+				const b = 0.48 + extra * 0.28;
+				if (t < a) return easeSmooth(t / a);
+				if (t < b) return 1;
+				return 1 - easeSmooth((t - b) / Math.max(0.001, 1 - b));
+			}
+			case 'double': {
+				const p1 = 0.18 + extra * 0.12;
+				const p2 = 0.58 + extra * 0.18;
+				const g1 = Math.exp(-0.5 * ((t - p1) / 0.11) ** 2);
+				const g2 = (0.55 + extra * 0.35) * Math.exp(-0.5 * ((t - p2) / 0.14) ** 2);
+				return Math.max(g1, g2);
+			}
+			case 'terrace': {
+				const steps = extra > 0.45 ? 4 : 3;
+				const upEnd = 0.68 + extra * 0.12;
+				if (t >= upEnd) return 1 - easeSmooth((t - upEnd) / Math.max(0.001, 1 - upEnd));
+				const u = t / upEnd;
+				const f = u * steps;
+				const i = Math.min(steps - 1, Math.floor(f));
+				const frac = f - i;
+				const a = i / steps;
+				const b = (i + 1) / steps;
+				return a + (b - a) * easeSmooth(frac);
+			}
+			case 'reverse': {
+				const drop = Math.exp(-t * (1.6 + extra * 1.8));
+				const late = extra > 0.35
+					? extra * 0.7 * Math.exp(-0.5 * ((t - (0.62 + extra * 0.18)) / 0.1) ** 2)
+					: 0;
+				return Math.max(drop, late);
+			}
+			case 'pulse': {
+				const w = 0.07 + extra * 0.1;
+				if (t < w) return Math.sin((t / w) * Math.PI);
+				return Math.exp(-(t - w) * (5 + extra * 4)) * 0.22;
+			}
+			case 'undulate': {
+				const a = Math.max(0.08, Math.min(0.5, attack));
+				const base = t < a
+					? easeSmooth(t / a)
+					: 1 - easeSmooth((t - a) / Math.max(0.001, 1 - a));
+				const wobble = (0.12 + extra * 0.16) * Math.sin(t * Math.PI * (2.5 + extra * 3.5));
+				return Math.max(0, Math.min(1, base + wobble * Math.max(0.2, base)));
+			}
+			case 'saw': {
+				const cut = 0.62 + extra * 0.28;
+				if (t < cut) return Math.pow(t / cut, 0.85 + extra * 0.7);
+				return Math.exp(-(t - cut) * (14 + extra * 10));
+			}
+			case 'inhale': {
+				return Math.pow(t, 0.45 + extra * 0.7);
+			}
+			case 'swell':
+			default: {
+				const a = Math.max(0.06, Math.min(0.55, attack));
+				if (t < a) return easeSmooth(t / a);
+				return 1 - easeSmooth((t - a) / Math.max(0.001, 1 - a));
+			}
+		}
+	}
+
 	function startBloom(lane: LaneState) {
-		const interval = rateToSeconds(lane.params.bpm, lane.params.rate);
+		const interval = Math.max(0.08, rateToSeconds(lane.params.bpm, lane.params.rate));
+		const last = lane.bloomMemory;
+		const missed = Math.random() < 0.12;
+
+		let peak: number;
+		if (missed) {
+			peak = 0.32 + Math.random() * 0.28;
+		} else if (Math.random() < 0.7) {
+			peak = last + (Math.random() * 2 - 1) * 0.3;
+		} else {
+			peak = 0.55 + Math.random() * 1.3;
+		}
+		peak = Math.max(0.35, Math.min(1.85, peak));
+		lane.bloomMemory = last * 0.4 + peak * 0.6;
+
+		let floor = 0.16 + Math.random() * 0.18;
+		if (floor > peak - 0.12) floor = Math.max(0.12, peak - 0.22);
+
+		lane.bloomPeak = peak;
+		lane.bloomFloor = floor;
+		lane.bloomAttack = missed
+			? 0.06 + Math.random() * 0.12
+			: 0.08 + Math.random() * 0.32;
+		lane.bloomShape = pickBloomShape(lane);
+		lane.bloomShapeExtra = Math.random();
+		const durScale = missed
+			? 0.32 + Math.random() * 0.4
+			: 0.45 + Math.random() * 1.45;
 		lane.bloomStart = nowSec();
-		lane.bloomDur = Math.max(0.05, interval);
+		lane.bloomDur = Math.max(0.08, interval * durScale);
 		lane.bloomActive = true;
 		config.onDensity?.(lane.padIndex, bloomDensity(lane, lane.bloomStart));
 	}
@@ -226,17 +384,8 @@ export function createMarkerSequencer(config: {
 	function bloomDensity(lane: LaneState, now: number): number {
 		const dur = Math.max(0.05, lane.bloomDur);
 		const p = Math.max(0, Math.min(1, (now - lane.bloomStart) / dur));
-		const attack = 0.15;
-		let env: number;
-		if (p < attack) {
-			const t = p / attack;
-			const ease = t * t * (3 - 2 * t);
-			env = 0.25 + (1.3 - 0.25) * ease;
-		} else {
-			const t = (p - attack) / (1 - attack);
-			const ease = t * t * (3 - 2 * t);
-			env = 1.3 + (0.25 - 1.3) * ease;
-		}
+		const amt = bloomShapeAmount(lane.bloomShape, p, lane.bloomAttack, lane.bloomShapeExtra);
+		const env = lane.bloomFloor + (lane.bloomPeak - lane.bloomFloor) * Math.max(0, Math.min(1, amt));
 		return Math.max(1, Math.min(60, lane.density * env));
 	}
 
@@ -480,6 +629,13 @@ export function createMarkerSequencer(config: {
 			bloomActive: false,
 			bloomStart: 0,
 			bloomDur: 0,
+			bloomPeak: 1.3,
+			bloomFloor: 0.25,
+			bloomAttack: 0.15,
+			bloomMemory: 1.05,
+			bloomShape: 'swell',
+			bloomShapeExtra: 0.5,
+			bloomShapeBag: [],
 			playingId: null,
 			playingIndex: -1,
 			fromIndex: -1,
@@ -580,7 +736,8 @@ export function createMarkerSequencer(config: {
 		let bloom = 0;
 		if (lane.bloomActive && lane.params.grainMode === 'bloom') {
 			const env = bloomDensity(lane, now) / Math.max(1, lane.density);
-			bloom = Math.max(0, Math.min(1, (env - 0.25) / 1.05));
+			const span = Math.max(0.08, lane.bloomPeak - lane.bloomFloor);
+			bloom = Math.max(0, Math.min(1, (env - lane.bloomFloor) / span));
 		}
 
 		return {
