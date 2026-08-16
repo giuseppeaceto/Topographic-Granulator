@@ -24,6 +24,7 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 	let markerColor = '#C4703A';
 	let regionRange: { start: number; end: number } | null = null;
 	let dragMarkerId: string | null = null;
+	let playheadSec: number | null = null;
 
 	let cachedResample: Float32Array | null = null;
 	let cachedWidth = 0;
@@ -39,6 +40,7 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 		markers = [];
 		activeMarkerId = null;
 		selectedMarkerId = null;
+		playheadSec = null;
 		draw();
 	}
 
@@ -272,6 +274,7 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 		}
 
 		drawMarkers();
+		drawPlayhead();
 	}
 
 	function hexToRgba(hex: string, alpha: number): string {
@@ -338,6 +341,29 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 			}
 			ctx2d.restore();
 		});
+	}
+
+	function drawPlayhead() {
+		if (!buffer || playheadSec == null) return;
+		const x = timeToX(playheadSec);
+		const h = canvas.height;
+		const motion = getComputedStyle(document.documentElement).getPropertyValue('--color-motion').trim() || '#A880C0';
+		ctx2d.save();
+		ctx2d.strokeStyle = motion;
+		ctx2d.lineWidth = 1.5;
+		ctx2d.globalAlpha = 0.9;
+		ctx2d.beginPath();
+		ctx2d.moveTo(x, 0);
+		ctx2d.lineTo(x, h);
+		ctx2d.stroke();
+		ctx2d.fillStyle = motion;
+		ctx2d.beginPath();
+		ctx2d.moveTo(x, 0);
+		ctx2d.lineTo(x + 5, 8);
+		ctx2d.lineTo(x - 5, 8);
+		ctx2d.closePath();
+		ctx2d.fill();
+		ctx2d.restore();
 	}
 
 	function hitTestMarker(x: number): Marker | null {
@@ -551,6 +577,12 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 		},
 		setActiveMarkerId: (id: string | null) => {
 			activeMarkerId = id;
+			draw();
+		},
+		setPlayhead: (timeSec: number | null) => {
+			if (timeSec == null && playheadSec == null) return;
+			if (timeSec != null && playheadSec != null && Math.abs(timeSec - playheadSec) < 0.0008) return;
+			playheadSec = timeSec;
 			draw();
 		},
 		setSelectedMarkerId: (id: string | null) => {

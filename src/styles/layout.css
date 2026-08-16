@@ -644,6 +644,33 @@
   padding: 4px 0;
 }
 
+.marker-transport {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0 6px;
+  padding: 6px 8px 4px;
+  border-radius: 8px;
+  background: var(--surface-1, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
+}
+
+.marker-transport canvas {
+  display: block;
+  width: 100%;
+  height: 48px;
+}
+
+.marker-transport-meta {
+  min-height: 10px;
+  font-family: "DM Mono", monospace;
+  font-size: 8px;
+  letter-spacing: 0.06em;
+  color: var(--color-motion);
+  opacity: 0.8;
+  text-align: center;
+}
+
 .rack-marker-full .knob::before {
   background: conic-gradient(
     from 225deg,

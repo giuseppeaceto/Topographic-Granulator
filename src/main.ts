@@ -1755,6 +1755,20 @@ function startVisualizationLoop() {
                     }
                 }
             }
+
+            const seqView = document.getElementById('sidebar-view-seq');
+            const seqVisible = !!seqView && !seqView.hidden;
+            const visual = state.activePadIndex != null
+                ? markerSequencer.getLaneVisual(state.activePadIndex)
+                : null;
+            if (seqVisible) {
+                markerRack?.updateLive(visual);
+            }
+            if (state.activePadIndex != null) {
+                waveform.setPlayhead(visual?.playheadSec ?? null);
+            } else {
+                waveform.setPlayhead(null);
+            }
             
             lastUpdate = now;
         }
