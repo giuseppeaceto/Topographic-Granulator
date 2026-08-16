@@ -116,24 +116,19 @@ impl DelayLine {
 
     // Reads from delay line at 'delay_ms' in the past
     pub fn read(&self, delay_ms: f32) -> f32 {
+        let len = self.buffer.len();
+        if len == 0 {
+            return 0.0;
+        }
         let delay_samples = (delay_ms / 1000.0 * self.sample_rate).max(0.0);
-        let read_ptr_raw = self.write_pos as f32 - delay_samples;
-        
-        // Wrap logic handled by using modulo on integer parts
-        let len_f = self.buffer.len() as f32;
-        let mut ptr = read_ptr_raw;
-        while ptr < 0.0 { ptr += len_f; }
-        while ptr >= len_f { ptr -= len_f; }
-        
-        let idx_int = ptr.floor() as usize;
+        let len_f = len as f32;
+        let ptr = (self.write_pos as f32 - delay_samples).rem_euclid(len_f);
+        let idx_int = (ptr as usize).min(len - 1);
         let frac = ptr - idx_int as f32;
-        
-        let idx_next = (idx_int + 1) % self.buffer.len();
-        
+        let idx_next = idx_int + 1;
+        let idx_next = if idx_next >= len { 0 } else { idx_next };
         let s1 = self.buffer[idx_int];
         let s2 = self.buffer[idx_next];
-        
-        // Linear interpolation
         s1 + (s2 - s1) * frac
     }
     

@@ -23,18 +23,44 @@ class GranularProcessor extends AudioWorkletProcessor {
     this.wasmMemory = null;
     this.wasmOutputPtr = null; 
     this.wasmOutputLen = 0;
+    this.heapF32 = null;
+    this.heapBuffer = null;
     this.useWasm = false;
+    this.wasmExports = null;
 
     this.port.onmessage = async (e) => {
       const msg = e.data;
       if (msg?.type === 'loadWasm') {
         try {
-          const module = await WebAssembly.compile(msg.wasmBytes);
-          
-          // Proxy per soddisfare import di wasm-bindgen (anche se ora non ne usiamo)
-          const importProxy = new Proxy({}, {
+          let module = (msg.wasmModule instanceof WebAssembly.Module) ? msg.wasmModule : null;
+          if (!module) {
+            const bytes = msg.wasmBytes;
+            if (!bytes) {
+              throw new Error('Missing wasmModule / wasmBytes');
+            }
+            module = await WebAssembly.compile(bytes);
+          }
+
+          const self = this;
+          const wbg = {
+            __wbindgen_init_externref_table: () => {
+              const table = self.wasmExports && self.wasmExports.__wbindgen_externrefs;
+              if (!table) return;
+              const offset = table.grow(4);
+              table.set(0, undefined);
+              table.set(offset + 0, undefined);
+              table.set(offset + 1, null);
+              table.set(offset + 2, true);
+              table.set(offset + 3, false);
+            },
+            __wbg___wbindgen_throw_dd24417ed36fc46e: () => {
+              throw new Error('granular wasm panic');
+            }
+          };
+          const importProxy = new Proxy(wbg, {
             get(target, prop) {
-              return (...args) => 0; // Dummy function
+              if (prop in target) return target[prop];
+              return () => 0;
             }
           });
 
@@ -44,25 +70,51 @@ class GranularProcessor extends AudioWorkletProcessor {
             './granular_core_bg.js': importProxy
           };
 
-          this.wasmInstance = await WebAssembly.instantiate(module, imports);
-          this.wasmMemory = this.wasmInstance.exports.memory;
-          
-          const exports = this.wasmInstance.exports;
-          
+          const instance = await WebAssembly.instantiate(module, imports);
+          this.wasmInstance = instance;
+          this.wasmExports = instance.exports;
+          this.wasmMemory = instance.exports.memory;
+
+          try {
+            if (typeof instance.exports.__wbindgen_start === 'function') {
+              instance.exports.__wbindgen_start();
+            }
+          } catch (startErr) {
+            console.warn('[GranularProcessor] wbindgen start skipped:', startErr);
+          }
+
+          const exports = instance.exports;
           if (exports.granularengine_new) {
               this.wasmEnginePtr = exports.granularengine_new(this.sampleRate_);
-              // console.log('[GranularProcessor] Rust Engine created');
-              
+
               if (this.pendingBuffer) {
                   this.sendBufferToWasm(this.pendingBuffer);
                   this.pendingBuffer = null;
               }
-              
-              this.useWasm = true; 
+              if (this.regionEnd > this.regionStart) {
+                  exports.granularengine_set_region(this.wasmEnginePtr, this.regionStart, this.regionEnd);
+              }
+              exports.granularengine_set_params(
+                  this.wasmEnginePtr,
+                  this.params.grainSizeMs,
+                  this.params.density,
+                  this.params.randomStartMs,
+                  this.params.pitchSemitones
+              );
+              if (this.running) {
+                  exports.granularengine_set_playing(this.wasmEnginePtr, 1);
+              }
+
+              this.useWasm = true;
+              this.port.postMessage({ type: 'wasmReady' });
+          } else {
+              throw new Error('granularengine_new export missing');
           }
 
         } catch (err) {
+          this.useWasm = false;
           console.error('[GranularProcessor] Failed to load WASM:', err);
+          this.port.postMessage({ type: 'wasmError', error: String(err && err.message ? err.message : err) });
         }
       } else if (msg?.type === 'setBuffer') {
         // Se WASM c'è, invia subito. Altrimenti salva per dopo.
@@ -158,6 +210,15 @@ class GranularProcessor extends AudioWorkletProcessor {
     };
   }
 
+  heapView() {
+      const buf = this.wasmMemory.buffer;
+      if (this.heapF32 == null || this.heapBuffer !== buf) {
+          this.heapBuffer = buf;
+          this.heapF32 = new Float32Array(buf);
+      }
+      return this.heapF32;
+  }
+
   sendBufferToWasm(float32Array) {
       if (!this.wasmInstance || !this.wasmEnginePtr) return;
       
@@ -165,12 +226,10 @@ class GranularProcessor extends AudioWorkletProcessor {
       const len = float32Array.length;
       
       const ptr = exports.alloc(len);
-      
-      const wasmHeap = new Float32Array(this.wasmMemory.buffer);
-      const offset = ptr / 4; 
-      wasmHeap.set(float32Array, offset);
-      
+      this.heapF32 = null;
+      this.heapView().set(float32Array, ptr / 4);
       exports.granularengine_set_buffer(this.wasmEnginePtr, ptr, len);
+      this.heapF32 = null;
   }
 
   process(inputs, outputs) {
@@ -178,38 +237,30 @@ class GranularProcessor extends AudioWorkletProcessor {
     const numChannels = output.length; 
     const frames = output[0].length;   
 
-    // Silence output initially
-    for (let ch = 0; ch < numChannels; ch++) {
-      output[ch].fill(0);
-    }
-
     if (this.useWasm && this.wasmEnginePtr && this.wasmInstance) {
         const exports = this.wasmInstance.exports;
         
-        // Lazy alloc output buffer
         if (!this.wasmOutputPtr || this.wasmOutputLen !== frames) {
             this.wasmOutputPtr = exports.alloc(frames);
             this.wasmOutputLen = frames;
+            this.heapF32 = null;
         }
         
-        // Process in Rust (Mono)
         exports.granularengine_process(this.wasmEnginePtr, this.wasmOutputPtr, frames);
         
-        // Copy back to JS
-        // Re-create view every frame (heap buffer might change)
-        const wasmHeap = new Float32Array(this.wasmMemory.buffer);
-        const offset = this.wasmOutputPtr / 4;
-        const result = wasmHeap.subarray(offset, offset + frames);
-        
-        // Copy Mono result to all output channels
-        for (let ch = 0; ch < numChannels; ch++) {
-            output[ch].set(result);
+        const wasmHeap = this.heapView();
+        const result = wasmHeap.subarray(this.wasmOutputPtr / 4, this.wasmOutputPtr / 4 + frames);
+        output[0].set(result);
+        for (let ch = 1; ch < numChannels; ch++) {
+            output[ch].set(output[0]);
         }
         
         return true;
     }
 
-    // Fallback silence if WASM not ready
+    for (let ch = 0; ch < numChannels; ch++) {
+      output[ch].fill(0);
+    }
     return true;
   }
 }

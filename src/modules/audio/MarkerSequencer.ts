@@ -1,4 +1,5 @@
 import {
+	BLOOM_SHAPES,
 	burstPattern,
 	clavePattern,
 	driftedMarkerTime,
@@ -9,6 +10,7 @@ import {
 	markersInRegion,
 	rateToSeconds,
 	thueMorsePattern,
+	type BloomShape,
 	type Marker,
 	type MarkerGrainMode,
 	type MarkerOrder,
@@ -61,6 +63,7 @@ type LaneState = {
 	bloomShape: BloomShape;
 	bloomShapeExtra: number;
 	bloomShapeBag: BloomShape[];
+	bloomPicked: boolean;
 	playingId: string | null;
 	playingIndex: number;
 	fromIndex: number;
@@ -68,30 +71,12 @@ type LaneState = {
 	visitTrail: number[];
 };
 
-type BloomShape =
-	| 'swell'
-	| 'bell'
-	| 'late'
-	| 'crash'
-	| 'plateau'
-	| 'double'
-	| 'terrace'
-	| 'reverse'
-	| 'pulse'
-	| 'undulate'
-	| 'saw'
-	| 'inhale';
-
-const BLOOM_SHAPES: BloomShape[] = [
-	'swell', 'bell', 'late', 'crash', 'plateau', 'double',
-	'terrace', 'reverse', 'pulse', 'undulate', 'saw', 'inhale'
-];
-
 export type MarkerLaneVisual = {
 	running: boolean;
 	progress: number;
 	bloom: number;
 	grainMode: MarkerGrainMode;
+	bloomShape: BloomShape | null;
 	markers: { id: string; timeSec: number; hold: number; liveSec: number; driftMs: number }[];
 	playingId: string | null;
 	playingIndex: number;
@@ -364,7 +349,14 @@ export function createMarkerSequencer(config: {
 		lane.bloomAttack = missed
 			? 0.06 + Math.random() * 0.12
 			: 0.08 + Math.random() * 0.32;
-		lane.bloomShape = pickBloomShape(lane);
+		const mode = lane.params.bloomShapeMode ?? 'random';
+		if (mode !== 'random') {
+			lane.bloomShape = mode;
+			lane.bloomPicked = true;
+		} else if (!lane.bloomPicked || Math.random() < (lane.params.bloomChange ?? 1)) {
+			lane.bloomShape = pickBloomShape(lane);
+			lane.bloomPicked = true;
+		}
 		lane.bloomShapeExtra = Math.random();
 		const durScale = missed
 			? 0.32 + Math.random() * 0.4
@@ -636,6 +628,7 @@ export function createMarkerSequencer(config: {
 			bloomShape: 'swell',
 			bloomShapeExtra: 0.5,
 			bloomShapeBag: [],
+			bloomPicked: false,
 			playingId: null,
 			playingIndex: -1,
 			fromIndex: -1,
@@ -745,6 +738,7 @@ export function createMarkerSequencer(config: {
 			progress,
 			bloom,
 			grainMode: lane.params.grainMode,
+			bloomShape: lane.params.grainMode === 'bloom' ? lane.bloomShape : null,
 			markers: list.map(m => ({
 				id: m.id,
 				timeSec: m.timeSec,

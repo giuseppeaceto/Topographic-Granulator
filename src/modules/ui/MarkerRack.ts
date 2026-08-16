@@ -1,11 +1,22 @@
 import type {
+	BloomShapeMode,
 	MarkerGrainMode,
 	MarkerOrder,
 	MarkerPattern,
 	MarkerRate,
 	MarkerSeqParams
 } from '../editor/MarkerStore';
-import { isAbsoluteRate, markerDriftMs, markerHold, patternUsesGridKnobs, sortMarkers } from '../editor/MarkerStore';
+import {
+	BLOOM_SHAPE_MODES,
+	bloomShapeModeLabel,
+	bloomUsesChangeKnob,
+	isAbsoluteRate,
+	markerDriftMs,
+	markerHold,
+	patternUsesGridKnobs,
+	sortMarkers,
+	usesBloomControls
+} from '../editor/MarkerStore';
 import type { MarkerLaneVisual } from '../audio/MarkerSequencer';
 
 const ORDER_VALUES: MarkerOrder[] = ['forward', 'reverse', 'pingpong', 'wander', 'random', 'shuffle'];
@@ -13,8 +24,25 @@ const ORDER_LABELS = ['Forward', 'Reverse', 'PingPong', 'Wander', 'Random', 'Shu
 const RATE_VALUES: MarkerRate[] = ['16s', '8s', '4s', '2/1', '1/1', '1/2', '1/4', '1/8', '1/8T', '1/16', '1/16T'];
 const PATTERN_VALUES: MarkerPattern[] = ['off', 'straight', 'euclidean', 'clave', 'thue', 'burst'];
 const PATTERN_LABELS = ['Off', 'Straight', 'Euclid', 'Clave', 'Thue', 'Burst'];
-const GRAIN_VALUES: MarkerGrainMode[] = ['cloud', 'pulse', 'glide', 'bloom', 'stutter', 'flam'];
-const GRAIN_LABELS = ['Cloud', 'Pulse', 'Glide', 'Bloom', 'Stutter', 'Flam'];
+
+type GrainChoice = {
+	grain: MarkerGrainMode;
+	bloom?: BloomShapeMode;
+	label: string;
+};
+
+const GRAIN_CYCLE: GrainChoice[] = [
+	{ grain: 'cloud', label: 'Cloud' },
+	{ grain: 'pulse', label: 'Pulse' },
+	{ grain: 'glide', label: 'Glide' },
+	...BLOOM_SHAPE_MODES.map(mode => ({
+		grain: 'bloom' as const,
+		bloom: mode,
+		label: bloomShapeModeLabel(mode)
+	})),
+	{ grain: 'stutter', label: 'Stutter' },
+	{ grain: 'flam', label: 'Flam' }
+];
 
 export type MarkerRack = {
 	sync: (params: MarkerSeqParams) => void;
@@ -31,6 +59,7 @@ export function createMarkerRack(config: {
 	const playBtn = document.getElementById('markerPlayBtn') as HTMLButtonElement | null;
 	const clearBtn = document.getElementById('markerClearBtn') as HTMLButtonElement | null;
 	const euclidRow = document.getElementById('markerEuclidRow') as HTMLElement | null;
+	const bloomRow = document.getElementById('markerBloomRow') as HTMLElement | null;
 	const holdTile = document.getElementById('markerHoldTile') as HTMLElement | null;
 	const driftTile = document.getElementById('markerDriftTile') as HTMLElement | null;
 	const driftSpeedTile = document.getElementById('markerDriftSpeedTile') as HTMLElement | null;
@@ -72,6 +101,23 @@ export function createMarkerRack(config: {
 		}
 	}
 
+	function syncBloomVisibility(grainMode: MarkerGrainMode, shapeMode: BloomShapeMode) {
+		if (bloomRow) {
+			bloomRow.hidden = !(usesBloomControls(grainMode) && bloomUsesChangeKnob(shapeMode));
+		}
+	}
+
+	function grainChoiceIndex(params: MarkerSeqParams): number {
+		if (params.grainMode === 'bloom') {
+			const mode = params.bloomShapeMode ?? 'random';
+			const idx = GRAIN_CYCLE.findIndex(c => c.grain === 'bloom' && (c.bloom ?? 'random') === mode);
+			if (idx >= 0) return idx;
+			return GRAIN_CYCLE.findIndex(c => c.grain === 'bloom' && c.bloom === 'random');
+		}
+		const idx = GRAIN_CYCLE.findIndex(c => c.grain === params.grainMode);
+		return idx >= 0 ? idx : 0;
+	}
+
 	function syncBpmTooltip(rate: MarkerRate) {
 		if (!bpmKnob) return;
 		bpmKnob.setAttribute(
@@ -103,10 +149,14 @@ export function createMarkerRack(config: {
 	});
 
 	bindSelector('marker-grain', (dir) => {
-		const label = document.querySelector('.option-selector-label[data-label="marker-grain"]')?.textContent ?? '';
-		const idx = Math.max(0, GRAIN_LABELS.indexOf(label));
-		const next = GRAIN_VALUES[(idx + dir + GRAIN_VALUES.length) % GRAIN_VALUES.length];
-		config.onChange({ grainMode: next });
+		const current = lastParams ?? null;
+		const idx = current ? grainChoiceIndex(current) : 0;
+		const next = GRAIN_CYCLE[(idx + dir + GRAIN_CYCLE.length) % GRAIN_CYCLE.length];
+		if (next.grain === 'bloom') {
+			config.onChange({ grainMode: 'bloom', bloomShapeMode: next.bloom ?? 'random' });
+		} else {
+			config.onChange({ grainMode: next.grain });
+		}
 	});
 
 	playBtn?.addEventListener('click', () => config.onPlayToggle());
@@ -331,7 +381,9 @@ export function createMarkerRack(config: {
 		if (visual.playingIndex >= 0) parts.push(`${visual.playingIndex + 1}/${count}`);
 		if (visual.holdLeft > 0) parts.push(`HOLD ${visual.holdLeft}`);
 		if (visual.markers.some(m => m.driftMs > 0)) parts.push('DRIFT');
-		if (visual.grainMode === 'bloom' && visual.bloom > 0.05) parts.push('BLOOM');
+		if (visual.grainMode === 'bloom' && visual.bloom > 0.05) {
+			parts.push(visual.bloomShape ? bloomShapeModeLabel(visual.bloomShape).toUpperCase() : 'BLOOM');
+		}
 		if (visual.grainMode === 'glide') parts.push('GLIDE');
 		metaEl.textContent = parts.join('  ·  ');
 	}
@@ -346,8 +398,10 @@ export function createMarkerRack(config: {
 		setLabel('marker-order', ORDER_LABELS[ORDER_VALUES.indexOf(params.order)] ?? 'Forward');
 		setLabel('marker-rate', params.rate);
 		setLabel('marker-pattern', PATTERN_LABELS[PATTERN_VALUES.indexOf(params.pattern)] ?? 'Straight');
-		setLabel('marker-grain', GRAIN_LABELS[GRAIN_VALUES.indexOf(params.grainMode)] ?? 'Cloud');
+		setLabel('marker-grain', GRAIN_CYCLE[grainChoiceIndex(params)]?.label ?? 'Cloud');
+		const shapeMode = params.bloomShapeMode ?? 'random';
 		syncEuclidVisibility(params.pattern);
+		syncBloomVisibility(params.grainMode, shapeMode);
 		syncBpmTooltip(params.rate);
 		setPlaying(params.enabled);
 		drawTransport();

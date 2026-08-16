@@ -42,6 +42,21 @@ function getWorkletPath(): string {
 
 import { logger } from '../utils/logger';
 
+let sharedWasmBytes: Promise<ArrayBuffer> | null = null;
+
+function getSharedWasmBytes(): Promise<ArrayBuffer> {
+	if (!sharedWasmBytes) {
+		sharedWasmBytes = (async () => {
+			logger.log('Fetching WASM from:', wasmUrl);
+			const response = await fetch(wasmUrl);
+			const wasmBytes = await response.arrayBuffer();
+			logger.log('WASM bytes ready, size:', wasmBytes.byteLength);
+			return wasmBytes;
+		})();
+	}
+	return sharedWasmBytes;
+}
+
 export async function createGranularWorkletEngine(ctx: AudioContext): Promise<GranularWorkletEngine> {
 	if (!('audioWorklet' in ctx)) {
 		throw new Error('AudioWorklet non supportato nel browser');
@@ -82,13 +97,17 @@ export async function createGranularWorkletEngine(ctx: AudioContext): Promise<Gr
 			logger.error('AudioWorkletProcessor error:', err);
 		};
 
-		// --- WASM LOADING ---
+		node.port.onmessage = (ev) => {
+			const msg = ev.data;
+			if (msg?.type === 'wasmError') {
+				logger.error('Audio worklet failed to init WASM:', msg.error);
+			}
+		};
+
 		try {
-			logger.log('Fetching WASM from:', wasmUrl);
-			const response = await fetch(wasmUrl);
-			const wasmBytes = await response.arrayBuffer();
-			logger.log('Sending WASM bytes to worklet, size:', wasmBytes.byteLength);
-			node.port.postMessage({ type: 'loadWasm', wasmBytes });
+			const wasmBytes = await getSharedWasmBytes();
+			// Clone: AudioWorklet cannot reliably receive a compiled WebAssembly.Module.
+			node.port.postMessage({ type: 'loadWasm', wasmBytes: wasmBytes.slice(0) });
 		} catch (wasmErr) {
 			logger.error('Failed to load WASM module:', wasmErr);
 		}

@@ -17,6 +17,36 @@ export type MarkerOrder = 'forward' | 'reverse' | 'pingpong' | 'random' | 'shuff
 export type MarkerGrainMode = 'cloud' | 'pulse' | 'glide' | 'stutter' | 'flam' | 'bloom';
 export type MarkerRate = '16s' | '8s' | '4s' | '2/1' | '1/1' | '1/2' | '1/4' | '1/8' | '1/8T' | '1/16' | '1/16T';
 export type MarkerPattern = 'off' | 'straight' | 'euclidean' | 'clave' | 'thue' | 'burst';
+export type BloomShape =
+	| 'swell'
+	| 'bell'
+	| 'late'
+	| 'crash'
+	| 'plateau'
+	| 'double'
+	| 'terrace'
+	| 'reverse'
+	| 'pulse'
+	| 'undulate'
+	| 'saw'
+	| 'inhale';
+export type BloomShapeMode = 'random' | BloomShape;
+
+export const BLOOM_SHAPES: BloomShape[] = [
+	'swell', 'bell', 'late', 'crash', 'plateau', 'double',
+	'terrace', 'reverse', 'pulse', 'undulate', 'saw', 'inhale'
+];
+export const BLOOM_SHAPE_MODES: BloomShapeMode[] = ['random', ...BLOOM_SHAPES];
+export const BLOOM_SHAPE_LABELS = [
+	'Random', 'Swell', 'Bell', 'Late', 'Crash', 'Plateau', 'Double',
+	'Terrace', 'Reverse', 'Spike', 'Undulate', 'Saw', 'Inhale'
+];
+
+export function bloomShapeModeLabel(mode: BloomShapeMode): string {
+	if (mode === 'random') return 'Bloom';
+	const idx = BLOOM_SHAPE_MODES.indexOf(mode);
+	return BLOOM_SHAPE_LABELS[idx] ?? mode;
+}
 
 export type MarkerSeqParams = {
 	enabled: boolean;
@@ -29,6 +59,8 @@ export type MarkerSeqParams = {
 	euclidHits: number;
 	euclidSteps: number;
 	chance: number;
+	bloomShapeMode: BloomShapeMode;
+	bloomChange: number;
 };
 
 let markerIdSeq = 0;
@@ -49,7 +81,9 @@ export function defaultMarkerSeq(): MarkerSeqParams {
 		pattern: 'straight',
 		euclidHits: 5,
 		euclidSteps: 8,
-		chance: 1
+		chance: 1,
+		bloomShapeMode: 'random',
+		bloomChange: 1
 	};
 }
 
@@ -75,6 +109,8 @@ export function mergeMarkerSeq(current: MarkerSeqParams, patch: Partial<MarkerSe
 		markers: patch.markers !== undefined ? patch.markers : current.markers
 	};
 	next.chance = clampChance(next.chance ?? 1);
+	next.bloomChange = clampChance(next.bloomChange ?? 1);
+	next.bloomShapeMode = next.bloomShapeMode ?? 'random';
 	return next;
 }
 
@@ -279,4 +315,12 @@ export function patternUsesGridKnobs(pattern: MarkerPattern): boolean {
 
 export function isDiscreteGrainMode(mode: MarkerGrainMode): boolean {
 	return mode === 'pulse' || mode === 'stutter' || mode === 'flam';
+}
+
+export function usesBloomControls(mode: MarkerGrainMode): boolean {
+	return mode === 'bloom';
+}
+
+export function bloomUsesChangeKnob(shapeMode: BloomShapeMode): boolean {
+	return shapeMode === 'random';
 }

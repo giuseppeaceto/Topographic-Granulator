@@ -5,9 +5,9 @@ export type XYPad = {
 	onChange: (cb: (pos: { x: number; y: number }) => void) => void;
 	setCornerLabels: (labels: { tl?: string; tr?: string; bl?: string; br?: string }) => void;
 	setSpeed?: (normal: number, shift: number) => void; // Optional method for setting keyboard speeds
-	setReverbMix?: (reverbMix: number) => void; // Optional method for setting reverb mix (0..1) to control symbol count
-	setFilterCutoff?: (cutoffHz: number, cornerWeight: number) => void; // Optional method for setting filter cutoff to control color tint (radial from TL corner)
-	setDensity?: (density: number, cornerWeight: number) => void; // Optional method for setting density (1-60) to control grid animation (radial from TR corner)
+	setReverbMix?: (reverbMix: number) => void; // Optional: reverb mix (0..1) drives scene fog
+	setFilterCutoff?: (cutoffHz: number, cornerWeight: number) => void; // Optional: cutoff + corner weight boost mesh brightness
+	setDensity?: (density: number, cornerWeight: number) => void; // Optional: density (1-60) drives lot extrusion and terrain relief
 	updateTheme?: () => void; // Optional method for updating theme colors
 	setGhostPositions?: (positions: { x: number, y: number, colorIndex: number }[]) => void; // Optional method for multi-cursor visualization
 	onCornerClick?: (cb: (cornerKey: 'tl' | 'tr' | 'bl' | 'br', ev: PointerEvent) => void) => void;

@@ -438,8 +438,6 @@ export class VoiceManager {
             if (active && x !== undefined && y !== undefined) {
                 voice.currentX = x;
                 voice.currentY = y;
-                // Force immediate update
-                this.applyXYToParams(voice);
             } else if (!active) {
                 // When releasing override, we need to resync the motion time?
                 // Option A: Jump back to where automation SHOULD be (keep sync) -> Do nothing, loop handles it

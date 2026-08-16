@@ -3,9 +3,8 @@
 /* ─── 1. Pad Grid Layout ─── */
 .pad-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 6px;
-  padding: 4px 0;
   width: 100%;
 }
 
@@ -15,67 +14,82 @@
   border: none;
 }
 
-/* ─── 2. Pad Items ─── */
-.pad {
-  aspect-ratio: 1 / 1;
-  width: 100%;
+/* ─── 2. Pad Slot Tiles ─── */
+.pad-slot {
+  cursor: pointer;
+  user-select: none;
+}
+
+.pad-slot .pad-well {
+  width: 44px;
+  height: 44px;
+  border-radius: 4px;
   background: var(--pad-bg);
   border: 1px solid var(--border);
-  border-radius: 4px;
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--muted);
-  font-family: 'Space Grotesk', sans-serif;
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  user-select: none;
-  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease, transform 0.1s ease;
+  flex-shrink: 0;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
 }
 
-.pad:hover {
+.pad-slot .pad-well svg {
+  width: 20px;
+  height: 20px;
+}
+
+.pad-slot:hover {
   border-color: var(--accent);
+}
+
+.pad-slot .tile-value {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pad-slot.assigned .tile-value {
   color: var(--text);
 }
 
-.pad.assigned {
-  color: var(--text);
-  border-color: var(--border-strong);
+.pad-slot.learn-pending,
+.pad.learn-pending {
+  outline: 1px dashed var(--learn-outline);
+  outline-offset: 1px;
 }
 
-.pad.active {
-  outline: none;
+.pad-slot.active {
   background: var(--accent-dim);
   border-color: var(--accent);
-  color: var(--text);
 }
 
-.pad:active {
+.pad-slot.add-pad-btn .pad-well {
+  border-style: dashed;
+  opacity: 0.85;
+}
+
+.pad-slot.is-disabled {
+  opacity: 0.38;
+  pointer-events: none;
+}
+
+.pad-slot:active:not(.is-disabled) .pad-well {
   transform: scale(0.96);
 }
 
-/* ─── 3. Pad Recall Bar ─── */
-.pad-recall-bar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding-top: 6px;
-  margin-top: auto;
-  border-top: 1px solid var(--border-subtle);
+.pad-clear-btn {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 4px;
+  flex-shrink: 0;
 }
 
-.recall-tile {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.pad-clear-btn:hover {
+  color: var(--danger);
+  border-color: var(--danger-border);
+  background: var(--danger-bg);
 }
 
-.recall-label {
-  font-family: 'Space Grotesk', sans-serif;
-  font-size: 9px;
-  font-weight: 700;
-  color: var(--muted);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}

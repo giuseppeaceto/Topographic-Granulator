@@ -28,6 +28,8 @@ import { initAllTooltips } from './modules/ui/TooltipManager';
 import { logger } from './modules/utils/logger';
 import { createGamepadManager } from './modules/input/GamepadManager';
 import { createLogo3D } from './modules/ui/Logo3D';
+import { createFxVisualizer } from './modules/ui/FxVisualizer';
+import { createPadVisualizer } from './modules/ui/PadVisualizer';
 import { loadAudioBuffer } from './modules/utils/audioLoader';
 import { SCALES, quantizePitch } from './modules/utils/ScaleQuantizer';
 
@@ -131,6 +133,13 @@ const recordVideoBtn = document.getElementById('recordVideoBtn') as HTMLButtonEl
 const stopRecordBtn = document.getElementById('stopRecordBtn') as HTMLButtonElement;
 const recordStatusEl = document.getElementById('recordStatus') as HTMLElement;
 const sidebarNav = initSidebarNav();
+const fxVisualizerCanvas = document.getElementById('fxVisualizerCanvas') as HTMLCanvasElement | null;
+const fxVisualizer = fxVisualizerCanvas ? createFxVisualizer(fxVisualizerCanvas) : null;
+const padVisualizerCanvas = document.getElementById('padVisualizerCanvas') as HTMLCanvasElement | null;
+const padVisualizerMeta = document.getElementById('padVisualizerMeta');
+const padVisualizer = padVisualizerCanvas
+	? createPadVisualizer(padVisualizerCanvas, padVisualizerMeta)
+	: null;
 const sidebarStatusPadEl = document.getElementById('sidebarStatusPad');
 const sidebarStatusSeqEl = document.getElementById('sidebarStatusSeq');
 const themeToggleBtn = document.getElementById('themeToggle') as HTMLButtonElement;
@@ -1045,9 +1054,9 @@ function highlightPending(target: string | null) {
 		const id = target.slice(5);
 		const tile = document.querySelector(`.param-tile [data-knob="${id}"]`)?.closest('.param-tile') as HTMLElement | null;
 		tile?.classList.add('learn-pending');
-	} else if (target.startsWith('pad:')) {
+		} else if (target.startsWith('pad:')) {
 		const idx = Number(target.split(':')[1]);
-		const pad = document.querySelector(`.pad-grid .pad:nth-child(${idx + 1})`) as HTMLElement | null;
+		const pad = document.querySelector(`.pad-grid .pad[data-index="${idx}"]`) as HTMLElement | null;
 		pad?.classList.add('learn-pending');
 	}
 }
@@ -1346,16 +1355,40 @@ function applyFxToEngine(patch: Partial<EffectsParams>) {
         // Update active voice engine & baseParams
         state.voiceManager?.updateVoiceBaseParams(state.activePadIndex, undefined, patch);
 	}
+	fxVisualizer?.setParams(merged);
 	return merged;
 }
 
 const PAD_COLORS = ['#A1E34B', '#66D9EF', '#FDBC40', '#FF7AA2', '#7C4DFF', '#00E5A8', '#F06292', '#FFD54F'];
+const MAX_PADS = 3;
+
+function syncPadVisualizer() {
+	if (!padVisualizer) return;
+	const regions = state.regions.getAll();
+	const slots = [];
+	for (let i = 0; i < MAX_PADS; i++) {
+		const region = regions[i] ?? null;
+		const visualIndex = region?.iconIndex !== undefined ? region.iconIndex : i;
+		slots.push({
+			assigned: !!region,
+			playing: state.voiceManager?.isPadPlaying(i) ?? false,
+			color: PAD_COLORS[visualIndex % PAD_COLORS.length],
+		});
+	}
+	const idx = state.activePadIndex;
+	padVisualizer.setState({
+		slots,
+		activeIndex: idx,
+		buffer: state.buffer,
+		region: idx != null ? state.regions.get(idx) : null,
+	});
+}
 
 function updatePadGrid() {
 	padGridEl.innerHTML = '';
-	const padGrid = createPadGrid(padGridEl, state.regions.getAll(), { colors: PAD_COLORS, activeIndex: state.activePadIndex, maxPads: 3 });
+	const padGrid = createPadGrid(padGridEl, state.regions.getAll(), { colors: PAD_COLORS, activeIndex: state.activePadIndex, maxPads: MAX_PADS });
 	padGrid.onAdd = () => {
-		if (state.regions.getAll().length >= 3) return;
+		if (state.regions.getAll().length >= MAX_PADS) return;
 		state.regions.add();
 		state.padParams.add();
 		updatePadGrid();
@@ -1448,6 +1481,7 @@ function updatePadGrid() {
                 }
             }
 		}
+		updatePadGrid();
 	};
 	padGrid.onPadLongPress = (index) => {
 		if (state.midi?.learnEnabled) {
@@ -1505,6 +1539,7 @@ function updatePadGrid() {
 		}
 	};
 	updateSidebarStatus();
+	syncPadVisualizer();
 }
 
 async function triggerRegion(region: Region) {
@@ -1600,6 +1635,7 @@ function updateSidebarStatus() {
 	sidebarNav.setLive('pads', playing);
 	sidebarNav.setLive('seq', running);
 	sidebarNav.setLive('io', state.recorder?.isRecording() ?? false);
+	syncPadVisualizer();
 }
 
 function updateRandTooltip(enabled: boolean) {
@@ -1623,7 +1659,7 @@ function refreshMarkerUI() {
 	const selectedId = waveform.getSelectedMarkerId();
 	markerRack?.setHoldEnabled(!!selectedId);
 	updateRandTooltip(seq.enabled);
-	(['marker-bpm', 'marker-chance', 'marker-euclid-hits', 'marker-euclid-steps', 'marker-hold', 'marker-drift', 'marker-drift-speed'] as const).forEach((id) => {
+	(['marker-bpm', 'marker-chance', 'marker-bloom-change', 'marker-euclid-hits', 'marker-euclid-steps', 'marker-hold', 'marker-drift', 'marker-drift-speed'] as const).forEach((id) => {
 		const cfg = knobConfigs.find(k => k.id === id);
 		if (!cfg) return;
 		const knobEl = document.querySelector(`.knob[data-knob="${id}"]`) as HTMLElement | null;
@@ -1855,11 +1891,6 @@ function updateVisualsFromXY(x: number, y: number) {
                     markersLiveShifted = true;
                 }
                 isXYMorphing = false;
-
-                const voice = state.voiceManager?.getActiveVoiceForPad(state.activePadIndex);
-                if (voice) {
-                    voice.engine.setRegion(clampedStart, clampedEnd);
-                }
             }
         }
     } else if (markersLiveShifted && state.activePadIndex != null) {
@@ -1906,6 +1937,7 @@ function updateVisualsFromXY(x: number, y: number) {
         const cutoffWeight = getInfluence('filterCutoffHz');
         xy.setFilterCutoff?.(fxUpdate.filterCutoffHz, cutoffWeight);
     }
+    fxVisualizer?.setParams({ ...getActiveFxParams(), ...fxUpdate });
 }
 
 startVisualizationLoop();
@@ -2013,6 +2045,7 @@ updatePadGrid();
 			
 			const densityWeight = calculateParamWeight('density', targetXY);
 			xy.setDensity?.(target.granular.density, densityWeight);
+			fxVisualizer?.setParams(target.effects);
 			return;
 		}
 
@@ -2079,6 +2112,7 @@ updatePadGrid();
 			};
 			const interpFx: EffectsParams = {
 				filterCutoffHz: fromFx.filterCutoffHz + (toFx.filterCutoffHz - fromFx.filterCutoffHz) * t,
+				filterQ: (fromFx.filterQ ?? 0.707) + ((toFx.filterQ ?? 0.707) - (fromFx.filterQ ?? 0.707)) * t,
 				delayTimeSec: fromFx.delayTimeSec + (toFx.delayTimeSec - fromFx.delayTimeSec) * t,
 				delayMix: fromFx.delayMix + (toFx.delayMix - fromFx.delayMix) * t,
 				delayFeedback: fromFx.delayFeedback! + ((toFx.delayFeedback ?? 0.3) - fromFx.delayFeedback!) * t,
@@ -2108,6 +2142,7 @@ updatePadGrid();
 			controls.setGranularUI(interpG);
 			controls.setFxUI(interpFx);
 			refreshParamTilesFromState();
+			fxVisualizer?.setParams(interpFx);
 			if (step >= steps) {
 				clearInterval(recallTimer!);
 				recallTimer = null;
@@ -2424,7 +2459,7 @@ setXYMode('params');
 
 // ---------- Param tiles (knobs) ----------
 type KnobConfig = {
-	id: 'pitch' | 'density' | 'grain' | 'rand' | 'selpos' | 'filter' | 'res' | 'dtime' | 'dmix' | 'reverb' | 'gain' | 'xyspeed' | 'xyshift' | 'motion-speed' | 'motion-loop' | 'zoom' | 'nudge-step' | 'recall' | 'midi-learn' | 'marker-bpm' | 'marker-chance' | 'marker-euclid-hits' | 'marker-euclid-steps' | 'marker-hold' | 'marker-drift' | 'marker-drift-speed';
+	id: 'pitch' | 'density' | 'grain' | 'rand' | 'selpos' | 'filter' | 'res' | 'dtime' | 'dmix' | 'reverb' | 'gain' | 'xyspeed' | 'xyshift' | 'motion-speed' | 'motion-loop' | 'zoom' | 'nudge-step' | 'recall' | 'midi-learn' | 'marker-bpm' | 'marker-chance' | 'marker-bloom-change' | 'marker-euclid-hits' | 'marker-euclid-steps' | 'marker-hold' | 'marker-drift' | 'marker-drift-speed';
 	min: number; max: number; step: number;
 	get: () => number;
 	set: (v: number) => void;
@@ -2857,6 +2892,16 @@ const knobConfigs: KnobConfig[] = [
 		format: (v) => `${Math.round(Math.max(0, Math.min(1, v)) * 100)}%`
 	},
 	{
+		id: 'marker-bloom-change', min: 0, max: 1, step: 0.01,
+		get: () => getMarkerSeq(state.activePadIndex ?? 0).bloomChange ?? 1,
+		set: (v) => {
+			if (state.activePadIndex == null) return;
+			state.padParams.setMarkerSeq(state.activePadIndex, { bloomChange: Math.max(0, Math.min(1, v)) });
+			syncMarkerEngine(state.activePadIndex);
+		},
+		format: (v) => `${Math.round(Math.max(0, Math.min(1, v)) * 100)}%`
+	},
+	{
 		id: 'marker-euclid-hits', min: 1, max: 16, step: 1,
 		get: () => getMarkerSeq(state.activePadIndex ?? 0).euclidHits,
 		set: (v) => {
@@ -2953,6 +2998,8 @@ function initParamTiles() {
 		const knobEl = document.querySelector(`.knob[data-knob="${cfg.id}"]`) as HTMLElement | null;
 		const valEl = document.querySelector(`.tile-value[data-val="${cfg.id}"]`) as HTMLElement | null;
 		if (!knobEl || !valEl) return;
+		if ((knobEl as any).__knobInitialized) return;
+		(knobEl as any).__knobInitialized = true;
 		// MIDI learn target binding
 		(knobEl.closest('.param-tile') as HTMLElement).addEventListener('click', () => {
 			if (state.midi.learnEnabled) {
@@ -3185,8 +3232,8 @@ function refreshParamTilesFromState() {
 		}
 	});
 	// Also refresh new knob types
-	const newKnobIds: Array<'motion-speed' | 'zoom' | 'nudge-step' | 'recall' | 'midi-learn'> = [
-		'motion-speed', 'zoom', 'nudge-step', 'recall', 'midi-learn'
+	const newKnobIds: Array<'motion-speed' | 'zoom' | 'nudge-step'> = [
+		'motion-speed', 'zoom', 'nudge-step'
 	];
 	newKnobIds.forEach(id => {
 		const cfg = knobConfigs.find(k => k.id === id);
@@ -3213,8 +3260,8 @@ refreshMarkerUI();
 // Initialize all new knob types (ones not handled by initParamTiles)
 function initAllKnobs() {
 	// Initialize new knob types that aren't in the main knobConfigs loop
-	const newKnobIds: Array<'motion-speed' | 'zoom' | 'nudge-step' | 'recall' | 'midi-learn'> = [
-		'motion-speed', 'zoom', 'nudge-step', 'recall', 'midi-learn'
+	const newKnobIds: Array<'motion-speed' | 'zoom' | 'nudge-step'> = [
+		'motion-speed', 'zoom', 'nudge-step'
 	];
 	
 	newKnobIds.forEach(id => {

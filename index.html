@@ -326,25 +326,33 @@
                 <div class="sidebar-rack rack-pads">
                   <div class="rack-header">
                     <span class="rack-title">PAD MATRIX</span>
-                    <div class="rack-header-actions">
-                      <button id="clearActivePadBtn" class="rack-action-btn" title="Clear active pad assignment" aria-label="Clear active pad assignment">
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                          <polyline points="3 6 5 6 21 6"></polyline>
-                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                        </svg>
-                      </button>
-                      <span class="rack-badge">3</span>
-                    </div>
+                    <span class="rack-badge">BANK</span>
+                  </div>
+                  <div class="pad-visualizer" aria-hidden="true">
+                    <canvas id="padVisualizerCanvas" width="320" height="180"></canvas>
+                    <div id="padVisualizerMeta" class="pad-visualizer-meta"></div>
                   </div>
                   <div class="rack-body pad-matrix-body">
                     <div class="grid-item-pads">
                       <div id="padGrid" class="pad-grid"></div>
                     </div>
-                    <div class="pad-recall-bar">
-                      <div class="param-tile recall-tile" data-tile="recall">
-                        <span class="recall-label">RECALL PARAMS</span>
-                        <div class="knob toggle-switch-knob active" data-knob="recall" data-tooltip="Recall parameters per pad - ON: smooth transition, OFF: instant"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                    <div class="param-grid-2col">
+                      <div class="param-tile" data-tile="recall">
+                        <div class="tile-header">RECALL</div>
+                        <div class="knob toggle-switch-knob active" data-knob="recall" data-tooltip="Recall parameters per pad - ON: smooth transition, OFF: instant">
+                          <div class="knob-switch-thumb"></div>
+                        </div>
                         <div class="tile-value" data-val="recall">ON</div>
+                      </div>
+                      <div class="param-tile" data-tile="pad-clear">
+                        <div class="tile-header">CLEAR</div>
+                        <button id="clearActivePadBtn" class="rack-action-btn pad-clear-btn" title="Clear active pad assignment" aria-label="Clear active pad assignment">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <polyline points="3 6 5 6 21 6"></polyline>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                          </svg>
+                        </button>
+                        <div class="tile-value">PAD</div>
                       </div>
                     </div>
                   </div>
@@ -356,6 +364,9 @@
                   <div class="rack-header">
                     <span class="rack-title">EFFECTS RACK</span>
                     <span class="rack-badge">DSP</span>
+                  </div>
+                  <div class="fx-visualizer" aria-hidden="true">
+                    <canvas id="fxVisualizerCanvas" width="320" height="180"></canvas>
                   </div>
                   <div class="rack-body param-grid-6col">
                     <div class="param-tile" data-tile="filter">
@@ -449,11 +460,18 @@
                       </div>
                       <div class="param-tile" data-tile="marker-grain">
                         <div class="tile-header">GRAIN</div>
-                        <div class="option-selector" data-selector="marker-grain" data-tooltip="Cloud: grains around the marker. Pulse: burst. Glide: smear between markers. Bloom: density swell. Stutter: triple hit. Flam: humanized double">
+                        <div class="option-selector" data-selector="marker-grain" data-tooltip="Cloud, Pulse, Glide, then Bloom shapes (Bloom = random, Swell, Bell, Late…), Stutter, Flam">
                           <button class="option-selector-btn" data-direction="prev" aria-label="Previous option">‹</button>
                           <span class="option-selector-label" data-label="marker-grain">Cloud</span>
                           <button class="option-selector-btn" data-direction="next" aria-label="Next option">›</button>
                         </div>
+                      </div>
+                    </div>
+                    <div id="markerBloomRow" hidden>
+                      <div id="markerBloomChangeTile" class="param-tile" data-tile="marker-bloom-change">
+                        <div class="tile-header">CHANGE</div>
+                        <div class="knob" data-knob="marker-bloom-change" data-tooltip="Chance the bloom shape switches on the next hit (Bloom random only)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                        <div class="tile-value" data-val="marker-bloom-change">100%</div>
                       </div>
                     </div>
                     <div class="param-grid-2col">

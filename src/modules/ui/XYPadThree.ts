@@ -2,46 +2,59 @@ import * as THREE from 'three';
 import type { XYPad } from './XYPad';
 
 type CornerLabels = { tl?: string; tr?: string; bl?: string; br?: string };
+type CornerKey = 'tl' | 'tr' | 'bl' | 'br';
+
+const SCENE_TILT = -0.9;
+const CORNER_DEFAULTS: Record<CornerKey, number> = {
+	tl: 0x7EB4D8,
+	tr: 0x7EB87E,
+	bl: 0xA880C0,
+	br: 0xC4703A
+};
+const CORNER_CSS_VARS: Record<CornerKey, string> = {
+	tl: '--color-granular',
+	tr: '--color-effects',
+	bl: '--color-motion',
+	br: '--accent'
+};
+
+function parseCssHex(value: string, fallback: number): number {
+	const hex = value.trim().replace('#', '');
+	if (/^[0-9a-fA-F]{6}$/.test(hex)) return parseInt(hex, 16);
+	return fallback;
+}
 
 export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
-	// Internal normalized position (0..1)
 	let pos = { x: 0.5, y: 0.5 };
 	let dragging = false;
 	let labels: CornerLabels = {};
-	// Configurable speeds
 	let normalSpeed = 0.15;
 	let shiftSpeed = 0.05;
 
-	// Three.js renderer with the provided canvas
 	const renderer = new THREE.WebGLRenderer({
 		canvas,
 		antialias: true,
 		alpha: false,
 		powerPreference: 'high-performance'
 	});
-	// Function to update clear color based on theme
-	function updateClearColor() {
-		const root = getComputedStyle(document.documentElement);
-		const bgColor = root.getPropertyValue('--xy-pad-bg').trim() || root.getPropertyValue('--waveform-bg').trim() || '#111111';
-		// Convert hex string to number (remove # if present)
-		const hex = bgColor.replace('#', '');
-		const color = parseInt(hex, 16);
-		renderer.setClearColor(color, 1);
-	}
-	updateClearColor();
 
-	// Scene and camera (perspective for 3D wireframe look)
 	const scene = new THREE.Scene();
-	const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 50);
-	camera.position.set(0.5, 0.6, 1.6);
-	camera.lookAt(0.5, 0.5, 0);
-	// lift the whole scene slightly to better center inside the square box
-	scene.position.y = 0.2;
-	// enlarge slightly
-	scene.scale.set(1.12, 1.12, 1);
+	const pivot = new THREE.Group();
+	const terrain = new THREE.Group();
+	terrain.position.set(-0.5, -0.5, 0);
+	pivot.add(terrain);
+	pivot.rotation.x = SCENE_TILT;
+	scene.add(pivot);
 
-	// Lighting — subtle, focused
-	const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+	const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 50);
+	const camLook = new THREE.Vector3(0, 0, 0);
+	camera.position.set(0, 0.22, 1.4);
+	camera.lookAt(camLook);
+	const raycaster = new THREE.Raycaster();
+	const ndc = new THREE.Vector2();
+	const tmpVec3 = new THREE.Vector3();
+
+	const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
 	scene.add(ambientLight);
 	const directionalLight1 = new THREE.DirectionalLight(0xffffff, 0.5);
 	directionalLight1.position.set(1, 1, 1);
@@ -50,178 +63,578 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 	directionalLight2.position.set(-1, -1, 0.5);
 	scene.add(directionalLight2);
 
-	// Wireframe grid geometry
+	const cornerColors: Record<CornerKey, THREE.Color> = {
+		tl: new THREE.Color(CORNER_DEFAULTS.tl),
+		tr: new THREE.Color(CORNER_DEFAULTS.tr),
+		bl: new THREE.Color(CORNER_DEFAULTS.bl),
+		br: new THREE.Color(CORNER_DEFAULTS.br)
+	};
+	const tmpColor = new THREE.Color();
+	const fog = new THREE.Fog(0x0C0C0B, 1.4, 8);
+	scene.fog = fog;
+
+	let cornersReady = false;
+	function readThemeColors() {
+		const root = getComputedStyle(document.documentElement);
+		const bgRaw = root.getPropertyValue('--xy-pad-bg').trim() || root.getPropertyValue('--waveform-bg').trim();
+		const bg = parseCssHex(bgRaw, 0x0C0C0B);
+		renderer.setClearColor(bg, 1);
+		fog.color.setHex(bg);
+		(Object.keys(CORNER_CSS_VARS) as CornerKey[]).forEach((key) => {
+			const raw = root.getPropertyValue(CORNER_CSS_VARS[key]);
+			cornerColors[key].setHex(parseCssHex(raw, CORNER_DEFAULTS[key]));
+		});
+		if (cornersReady) syncCornerMaterials();
+	}
+
+	readThemeColors();
+
+	// Street grid
 	const gridCols = 18;
 	const gridRows = 18;
-	const totalPoints = gridCols * gridRows;
-	const normPositions: Float32Array = new Float32Array(totalPoints * 2); // x,y in 0..1
-
-	// Build normalized grid positions
+	const normPositions: Float32Array = new Float32Array(gridCols * gridRows * 2);
 	for (let r = 0; r < gridRows; r++) {
 		for (let c = 0; c < gridCols; c++) {
 			const i = r * gridCols + c;
-			const x = c / (gridCols - 1);
-			const y = r / (gridRows - 1);
-			normPositions[i * 2 + 0] = x;
-			normPositions[i * 2 + 1] = y;
+			normPositions[i * 2 + 0] = c / (gridCols - 1);
+			normPositions[i * 2 + 1] = r / (gridRows - 1);
 		}
 	}
 
-	// Create line segments between right and bottom neighbors to avoid dupes
 	const segments: Array<[number, number]> = [];
 	for (let r = 0; r < gridRows; r++) {
 		for (let c = 0; c < gridCols; c++) {
 			const i = r * gridCols + c;
-			if (c + 1 < gridCols) {
-				const j = r * gridCols + (c + 1);
-				segments.push([i, j]);
-			}
-			if (r + 1 < gridRows) {
-				const j = (r + 1) * gridCols + c;
-				segments.push([i, j]);
-			}
+			if (c + 1 < gridCols) segments.push([i, r * gridCols + (c + 1)]);
+			if (r + 1 < gridRows) segments.push([i, (r + 1) * gridCols + c]);
 		}
 	}
 
-	// Position buffer (world units 0..1 in x/y) and color buffer
-	let linePositions = new Float32Array(segments.length * 2 * 3); // 3D coords
-	const lineColors = new Float32Array(segments.length * 2 * 3); // RGB
-
+	let linePositions = new Float32Array(segments.length * 2 * 3);
+	const lineColors = new Float32Array(segments.length * 2 * 3);
 	const geometry = new THREE.BufferGeometry();
 	geometry.setAttribute('position', new THREE.BufferAttribute(linePositions, 3));
 	geometry.setAttribute('color', new THREE.BufferAttribute(lineColors, 3));
-
 	const material = new THREE.LineBasicMaterial({
 		vertexColors: true,
 		transparent: true,
-		opacity: 1,
-		linewidth: 1 // note: ignored on most platforms, but we keep it for completeness
+		opacity: 0.9,
+		fog: true
 	});
-
 	const lines = new THREE.LineSegments(geometry, material);
-	scene.add(lines);
+	terrain.add(lines);
 
-	// Cursor sphere — copper/warm tone matching accent
+	// City lots: 9x9 wireframe boxes, inset so streets remain visible
+	const blockN = 9;
+	const blockCount = blockN * blockN;
+	const edgesPerBox = 12;
+	const floatsPerBox = edgesPerBox * 2 * 3;
+	type Lot = { x0: number; y0: number; x1: number; y1: number; cx: number; cy: number; hash: number };
+	const lots: Lot[] = [];
+	const lotPitch = 1 / blockN;
+	const lotGap = 0.018;
+	function fract(n: number) { return n - Math.floor(n); }
+	for (let br = 0; br < blockN; br++) {
+		for (let bc = 0; bc < blockN; bc++) {
+			const x0 = bc * lotPitch + lotGap;
+			const y0 = br * lotPitch + lotGap;
+			const x1 = (bc + 1) * lotPitch - lotGap;
+			const y1 = (br + 1) * lotPitch - lotGap;
+			const i = br * blockN + bc;
+			lots.push({
+				x0, y0, x1, y1,
+				cx: (x0 + x1) * 0.5,
+				cy: (y0 + y1) * 0.5,
+				hash: fract(Math.sin(i * 127.1 + 311.7) * 43758.5453)
+			});
+		}
+	}
+	const blockPositions = new Float32Array(blockCount * floatsPerBox);
+	const blockColors = new Float32Array(blockCount * floatsPerBox);
+	const blockGeometry = new THREE.BufferGeometry();
+	blockGeometry.setAttribute('position', new THREE.BufferAttribute(blockPositions, 3));
+	blockGeometry.setAttribute('color', new THREE.BufferAttribute(blockColors, 3));
+	const blockMaterial = new THREE.LineBasicMaterial({
+		vertexColors: true,
+		transparent: true,
+		opacity: 0.85,
+		fog: true
+	});
+	const blockLines = new THREE.LineSegments(blockGeometry, blockMaterial);
+	terrain.add(blockLines);
+
+	function writeBox(
+		out: Float32Array,
+		offset: number,
+		x0: number, y0: number, x1: number, y1: number,
+		z0: number, z1: number
+	) {
+		const v = [
+			x0, y0, z0, x1, y0, z0, x1, y1, z0, x0, y1, z0,
+			x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1
+		];
+		const edges: Array<[number, number]> = [
+			[0, 1], [1, 2], [2, 3], [3, 0],
+			[4, 5], [5, 6], [6, 7], [7, 4],
+			[0, 4], [1, 5], [2, 6], [3, 7]
+		];
+		let p = offset;
+		for (const [a, b] of edges) {
+			out[p++] = v[a * 3]; out[p++] = v[a * 3 + 1]; out[p++] = v[a * 3 + 2];
+			out[p++] = v[b * 3]; out[p++] = v[b * 3 + 1]; out[p++] = v[b * 3 + 2];
+		}
+	}
+
+	function writeBoxColor(out: Float32Array, offset: number, r: number, g: number, b: number) {
+		for (let i = 0; i < edgesPerBox * 2; i++) {
+			const p = offset + i * 3;
+			out[p] = r; out[p + 1] = g; out[p + 2] = b;
+		}
+	}
+
+	// Construct rain: short falling dashes, colored by the morph field — not Matrix-green
+	const rainCount = 56;
+	type RainDrop = { x: number; y: number; z: number; speed: number; len: number };
+	const rainDrops: RainDrop[] = [];
+	for (let i = 0; i < rainCount; i++) {
+		rainDrops.push({
+			x: Math.random(),
+			y: Math.random(),
+			z: Math.random() * 0.32,
+			speed: 0.07 + Math.random() * 0.16,
+			len: 0.028 + Math.random() * 0.045
+		});
+	}
+	const rainPositions = new Float32Array(rainCount * 2 * 3);
+	const rainColors = new Float32Array(rainCount * 2 * 3);
+	const rainGeometry = new THREE.BufferGeometry();
+	rainGeometry.setAttribute('position', new THREE.BufferAttribute(rainPositions, 3));
+	rainGeometry.setAttribute('color', new THREE.BufferAttribute(rainColors, 3));
+	const rainMaterial = new THREE.LineBasicMaterial({
+		vertexColors: true,
+		transparent: true,
+		opacity: 0.55,
+		fog: true
+	});
+	terrain.add(new THREE.LineSegments(rainGeometry, rainMaterial));
+
 	const knobGeom = new THREE.SphereGeometry(1, 16, 16);
-	const knobMat = new THREE.MeshStandardMaterial({ 
-		color: 0xd4855a,   // accent2: siena/copper warm
+	const knobMat = new THREE.MeshStandardMaterial({
+		color: 0xd4855a,
 		metalness: 0.3,
 		roughness: 0.6,
-		flatShading: false
+		fog: true
 	});
 	const knob = new THREE.Mesh(knobGeom, knobMat);
-	scene.add(knob);
-	knob.scale.set(0.04, 0.04, 0.04); // scale to world units (più grande)
-	knob.position.z = 0.025; // Slightly higher for more prominent elevation effect
+	terrain.add(knob);
+	knob.scale.set(0.04, 0.04, 0.04);
 
-    // Ghost Cursors Group
-    const ghostsGroup = new THREE.Group();
-    scene.add(ghostsGroup);
-    
-    // Pool of ghost meshes
-    const ghostMeshes: THREE.Mesh[] = [];
-    const ghostMaterials: THREE.MeshStandardMaterial[] = [];
-    const PAD_COLORS_HEX = [0xA1E34B, 0x66D9EF, 0xFDBC40, 0xFF7AA2, 0x7C4DFF, 0x00E5A8, 0xF06292, 0xFFD54F];
+	const ghostsGroup = new THREE.Group();
+	terrain.add(ghostsGroup);
+	const ghostMeshes: THREE.Mesh[] = [];
+	const ghostMaterials: THREE.MeshStandardMaterial[] = [];
+	const PAD_COLORS_HEX = [0xA1E34B, 0x66D9EF, 0xFDBC40, 0xFF7AA2, 0x7C4DFF, 0x00E5A8, 0xF06292, 0xFFD54F];
+	let lastGhosts: { x: number; y: number; colorIndex: number }[] = [];
 
-    function updateGhosts(positions: { x: number, y: number, colorIndex: number }[]) {
-        // Ensure pool size
-        while (ghostMeshes.length < positions.length) {
-            const mat = new THREE.MeshStandardMaterial({
-                color: 0xffffff,
-                transparent: true,
-                opacity: 0.6,
-                metalness: 0.2,
-                roughness: 0.2
-            });
-            const mesh = new THREE.Mesh(knobGeom, mat);
-            mesh.scale.set(0.025, 0.025, 0.025); // Slightly smaller than main knob
-            ghostMeshes.push(mesh);
-            ghostMaterials.push(mat);
-            ghostsGroup.add(mesh);
-        }
-        
-        // Hide unused
-        for (let i = positions.length; i < ghostMeshes.length; i++) {
-            ghostMeshes[i].visible = false;
-        }
-        
-        // Update active
-        for (let i = 0; i < positions.length; i++) {
-            const ghost = ghostMeshes[i];
-            const data = positions[i];
-            ghost.visible = true;
-            ghost.position.x = data.x;
-            ghost.position.y = 1 - data.y; // Invert Y for display
-            ghost.position.z = 0.02;
-            
-            const colorHex = PAD_COLORS_HEX[data.colorIndex % PAD_COLORS_HEX.length];
-            ghostMaterials[i].color.setHex(colorHex);
-            ghostMaterials[i].emissive.setHex(colorHex);
-            ghostMaterials[i].emissiveIntensity = 0.4;
-        }
-    }
-
-	// Symbol particles system - simboli strani vicino ai vertici influenzati
-	const symbolsGroup = new THREE.Group();
-	scene.add(symbolsGroup);
-	
-	// Array per tracciare i simboli attivi
-	type SymbolData = {
-		mesh: THREE.Mesh;
-		vertexIndex: number;
-		baseX: number;
-		baseY: number;
-	};
-	const activeSymbols: SymbolData[] = [];
-	const maxSymbolsWhenFull = 30; // numero massimo di simboli quando riverbero = 1
-	let reverbMix = 0; // valore del riverbero (0..1) che controlla quanti simboli mostrare
-	let filterCutoffHz = 4000; // valore del filtro cutoff (Hz)
-	let cutoffCornerWeight = 0; // peso del vertice TL (0..1) per l'effetto radiale
-	let density = 15; // valore della densità (1-60 grains/sec) per l'animazione della griglia
-	let densityCornerWeight = 0; // peso del vertice TR (0..1) per l'effetto radiale della densità
-	
-	// Funzione per creare simboli geometrici interessanti (solo poligoni)
-	function createSymbol(shapeType: number): THREE.Mesh {
-		let geom: THREE.BufferGeometry;
-		const size = 0.015;
-		
-		switch (shapeType % 4) {
-			case 0: // Triangolo (prisma triangolare)
-				geom = new THREE.CylinderGeometry(size * 0.6, size * 0.6, size * 0.8, 3);
-				break;
-			case 1: // Quadrato (prisma quadrato)
-				geom = new THREE.BoxGeometry(size * 1.2, size * 1.2, size * 0.8);
-				break;
-			case 2: // Pentagono (prisma pentagonale)
-				geom = new THREE.CylinderGeometry(size * 0.7, size * 0.7, size * 0.8, 5);
-				break;
-			default: // Esagono (prisma esagonale)
-				geom = new THREE.CylinderGeometry(size * 0.8, size * 0.8, size * 0.8, 6);
-		}
-		
-		const mat = new THREE.MeshStandardMaterial({
-			color: 0xC4703A,     // accent: siena/copper
-			emissive: 0x7A3A18,
-			emissiveIntensity: 0.3,
-			metalness: 0.5,
-			roughness: 0.4,
-			transparent: true,
-			opacity: 0.85
-		});
-		
-		const mesh = new THREE.Mesh(geom, mat);
-		mesh.rotation.z = Math.random() * Math.PI * 2;
-		return mesh;
-	}
+	let reverbMix = 0;
+	let filterCutoffHz = 4000;
+	let cutoffCornerWeight = 0;
+	let density = 15;
+	let densityCornerWeight = 0;
 
 	let bufferW = 0;
 	let bufferH = 0;
 	let tStart = performance.now();
 	let tSec = 0;
-	// Ripple state (updated on each setPosition)
 	let rippleOX = 0.5;
 	let rippleOY = 0.5;
-	let rippleT0 = 0; // seconds
+	let rippleT0 = 0;
+
+	const influence = 0.25;
+	const influenceSq = influence * influence;
+
+	function cornerBlend(x: number, y: number, out: THREE.Color): THREE.Color {
+		const wTL = (1 - x) * y;
+		const wTR = x * y;
+		const wBL = (1 - x) * (1 - y);
+		const wBR = x * (1 - y);
+		out.r = cornerColors.tl.r * wTL + cornerColors.tr.r * wTR + cornerColors.bl.r * wBL + cornerColors.br.r * wBR;
+		out.g = cornerColors.tl.g * wTL + cornerColors.tr.g * wTR + cornerColors.bl.g * wBL + cornerColors.br.g * wBR;
+		out.b = cornerColors.tl.b * wTL + cornerColors.tr.b * wTR + cornerColors.bl.b * wBL + cornerColors.br.b * wBR;
+		return out;
+	}
+
+	function cursorWeight(x: number, y: number, kx: number, ky: number): number {
+		const dx = x - kx;
+		const dy = y - ky;
+		const dSq = dx * dx + dy * dy;
+		return dSq < influenceSq ? 1 - Math.sqrt(dSq / influenceSq) : 0;
+	}
+
+	function densityNorm(): number {
+		return Math.max(0, Math.min(1, (density - 1) / 59));
+	}
+
+	function densityIntensity(): number {
+		return densityNorm() * densityCornerWeight;
+	}
+
+	function densityRelief(x: number, y: number): number {
+		const intensity = densityIntensity();
+		if (intensity <= 0.001) return 0;
+		const freq = 0.5 + densityNorm() * 1.4;
+		const pulse = Math.sin(tSec * freq * Math.PI * 2);
+		const spatial = Math.sin((x + y) * Math.PI * 3 + tSec * 0.7);
+		return 0.04 * intensity * (0.55 * pulse + 0.45 * spatial);
+	}
+
+	function rippleHeight(x: number, y: number): number {
+		const dx = x - rippleOX;
+		const dy = y - rippleOY;
+		const dist = Math.sqrt(dx * dx + dy * dy);
+		const elapsed = Math.max(0, tSec - rippleT0);
+		const rippleWavelength = 0.18;
+		const rippleSpeed = 0.6;
+		const k = (Math.PI * 2) / rippleWavelength;
+		const omega = (Math.PI * 2 * rippleSpeed) / rippleWavelength;
+		const phase = k * dist - omega * elapsed;
+		const decay = Math.exp(-dist * 3.0) * Math.exp(-elapsed * 1.2);
+		return 0.04 * Math.sin(phase) * decay;
+	}
+
+	function heightAt(x: number, y: number, kx: number, ky: number): number {
+		return 0.18 * cursorWeight(x, y, kx, ky) + rippleHeight(x, y) + densityRelief(x, y);
+	}
+
+	function cutoffBoost(): number {
+		const cutoffNorm = Math.max(0, Math.min(1, (filterCutoffHz - 200) / (12000 - 200)));
+		return 1 + 0.35 * cutoffNorm * cutoffCornerWeight;
+	}
+
+	function updateFog() {
+		const threshold = 0.15;
+		const amount = reverbMix < threshold ? 0 : (reverbMix - threshold) / (1 - threshold);
+		fog.near = 0.95 - amount * 0.3;
+		fog.far = 3.2 - amount * 1.6;
+	}
+
+	function updateRain(dt: number) {
+		const densI = densityIntensity();
+		const speedMul = 0.5 + densI * 1.6 + reverbMix * 0.4;
+		const bright = 0.35 + densI * 0.45;
+		for (let i = 0; i < rainDrops.length; i++) {
+			const drop = rainDrops[i];
+			drop.z -= drop.speed * dt * speedMul;
+			if (drop.z + drop.len < 0) {
+				drop.x = Math.random();
+				drop.y = Math.random();
+				drop.z = 0.18 + Math.random() * 0.2;
+				drop.speed = 0.07 + Math.random() * 0.16;
+				drop.len = 0.028 + Math.random() * 0.045;
+			}
+			const p = i * 6;
+			rainPositions[p] = drop.x;
+			rainPositions[p + 1] = drop.y;
+			rainPositions[p + 2] = drop.z + drop.len;
+			rainPositions[p + 3] = drop.x;
+			rainPositions[p + 4] = drop.y;
+			rainPositions[p + 5] = drop.z;
+			cornerBlend(drop.x, drop.y, tmpColor);
+			rainColors[p] = tmpColor.r * bright * 0.45;
+			rainColors[p + 1] = tmpColor.g * bright * 0.45;
+			rainColors[p + 2] = tmpColor.b * bright * 0.45;
+			rainColors[p + 3] = Math.min(1, tmpColor.r * bright);
+			rainColors[p + 4] = Math.min(1, tmpColor.g * bright);
+			rainColors[p + 5] = Math.min(1, tmpColor.b * bright);
+		}
+		const posAttr = rainGeometry.getAttribute('position') as THREE.BufferAttribute;
+		posAttr.set(rainPositions);
+		posAttr.needsUpdate = true;
+		const colAttr = rainGeometry.getAttribute('color') as THREE.BufferAttribute;
+		colAttr.set(rainColors);
+		colAttr.needsUpdate = true;
+		rainMaterial.opacity = 0.35 + densI * 0.35 + Math.min(0.2, reverbMix * 0.25);
+	}
+
+	function updateGhosts(positions: { x: number; y: number; colorIndex: number }[]) {
+		lastGhosts = positions;
+		while (ghostMeshes.length < positions.length) {
+			const mat = new THREE.MeshStandardMaterial({
+				color: 0xffffff,
+				transparent: true,
+				opacity: 0.6,
+				metalness: 0.2,
+				roughness: 0.2,
+				fog: true
+			});
+			const mesh = new THREE.Mesh(knobGeom, mat);
+			mesh.scale.set(0.025, 0.025, 0.025);
+			ghostMeshes.push(mesh);
+			ghostMaterials.push(mat);
+			ghostsGroup.add(mesh);
+		}
+		for (let i = positions.length; i < ghostMeshes.length; i++) {
+			ghostMeshes[i].visible = false;
+		}
+		const kx = pos.x;
+		const ky = 1 - pos.y;
+		for (let i = 0; i < positions.length; i++) {
+			const ghost = ghostMeshes[i];
+			const data = positions[i];
+			ghost.visible = true;
+			ghost.position.x = data.x;
+			ghost.position.y = 1 - data.y;
+			ghost.position.z = heightAt(data.x, 1 - data.y, kx, ky) + 0.015;
+			const colorHex = PAD_COLORS_HEX[data.colorIndex % PAD_COLORS_HEX.length];
+			ghostMaterials[i].color.setHex(colorHex);
+			ghostMaterials[i].emissive.setHex(colorHex);
+			ghostMaterials[i].emissiveIntensity = 0.4;
+		}
+	}
+
+	function rebuildLinePositions() {
+		linePositions = new Float32Array(segments.length * 2 * 3);
+		let p = 0;
+		for (let s = 0; s < segments.length; s++) {
+			const [a, b] = segments[s];
+			linePositions[p++] = normPositions[a * 2 + 0];
+			linePositions[p++] = normPositions[a * 2 + 1];
+			linePositions[p++] = 0;
+			linePositions[p++] = normPositions[b * 2 + 0];
+			linePositions[p++] = normPositions[b * 2 + 1];
+			linePositions[p++] = 0;
+		}
+		const posAttr = geometry.getAttribute('position') as THREE.BufferAttribute;
+		posAttr.set(linePositions);
+		posAttr.needsUpdate = true;
+		updateColorsAndKnob();
+	}
+
+	function updateColorsAndKnob() {
+		const kx = pos.x;
+		const ky = 1 - pos.y;
+		const boost = cutoffBoost();
+		const minI = 0.22;
+		const maxI = 1.0;
+
+		const knobZ = heightAt(kx, ky, kx, ky);
+		knob.position.set(kx, ky, knobZ + 0.02);
+		cornerBlend(kx, ky, tmpColor);
+		knobMat.color.copy(tmpColor);
+		const cutoffAmt = boost - 1;
+		if (cutoffAmt > 0.001) {
+			knobMat.emissive.setRGB(tmpColor.r * 0.5, tmpColor.g * 0.5, tmpColor.b * 0.5);
+			knobMat.emissiveIntensity = cutoffAmt * 2.2;
+		} else {
+			knobMat.emissive.setRGB(0, 0, 0);
+			knobMat.emissiveIntensity = 0;
+		}
+
+		let c = 0;
+		let p = 0;
+		for (let s = 0; s < segments.length; s++) {
+			const x1 = linePositions[p + 0];
+			const y1 = linePositions[p + 1];
+			const w1 = cursorWeight(x1, y1, kx, ky);
+			const i1 = (minI + (maxI - minI) * w1) * boost;
+			linePositions[p + 2] = heightAt(x1, y1, kx, ky);
+
+			const x2 = linePositions[p + 3];
+			const y2 = linePositions[p + 4];
+			const w2 = cursorWeight(x2, y2, kx, ky);
+			const i2 = (minI + (maxI - minI) * w2) * boost;
+			linePositions[p + 5] = heightAt(x2, y2, kx, ky);
+
+			cornerBlend(x1, y1, tmpColor);
+			lineColors[c++] = Math.min(1, tmpColor.r * i1);
+			lineColors[c++] = Math.min(1, tmpColor.g * i1);
+			lineColors[c++] = Math.min(1, tmpColor.b * i1);
+			cornerBlend(x2, y2, tmpColor);
+			lineColors[c++] = Math.min(1, tmpColor.r * i2);
+			lineColors[c++] = Math.min(1, tmpColor.g * i2);
+			lineColors[c++] = Math.min(1, tmpColor.b * i2);
+			p += 6;
+		}
+		const posAttr = geometry.getAttribute('position') as THREE.BufferAttribute;
+		posAttr.set(linePositions);
+		posAttr.needsUpdate = true;
+		const colAttr = geometry.getAttribute('color') as THREE.BufferAttribute;
+		colAttr.set(lineColors);
+		colAttr.needsUpdate = true;
+
+		const densI = densityIntensity();
+		for (let i = 0; i < lots.length; i++) {
+			const lot = lots[i];
+			const localW = cursorWeight(lot.cx, lot.cy, kx, ky);
+			const restH = 0.03 + lot.hash * 0.08;
+			const liveH = densI * (0.06 + 0.12 * localW);
+			const h = restH + liveH;
+			const z0 = heightAt(lot.cx, lot.cy, kx, ky);
+			writeBox(blockPositions, i * floatsPerBox, lot.x0, lot.y0, lot.x1, lot.y1, z0, z0 + h);
+			cornerBlend(lot.cx, lot.cy, tmpColor);
+			const li = (minI + (maxI - minI) * localW) * boost;
+			writeBoxColor(blockColors, i * floatsPerBox, Math.min(1, tmpColor.r * li), Math.min(1, tmpColor.g * li), Math.min(1, tmpColor.b * li));
+		}
+		const bPosAttr = blockGeometry.getAttribute('position') as THREE.BufferAttribute;
+		bPosAttr.set(blockPositions);
+		bPosAttr.needsUpdate = true;
+		const bColAttr = blockGeometry.getAttribute('color') as THREE.BufferAttribute;
+		bColAttr.set(blockColors);
+		bColAttr.needsUpdate = true;
+
+		Object.values(cornerNodes).forEach((node) => {
+			node.group.position.z = heightAt(node.worldPos.x, node.worldPos.y, kx, ky) + 0.03;
+		});
+
+		if (lastGhosts.length > 0) {
+			for (let i = 0; i < lastGhosts.length; i++) {
+				const data = lastGhosts[i];
+				ghostMeshes[i].position.z = heightAt(data.x, 1 - data.y, kx, ky) + 0.015;
+			}
+		}
+
+		material.opacity = 0.9;
+	}
+
+	type CornerNode = {
+		key: CornerKey;
+		group: THREE.Group;
+		mesh: THREE.Mesh;
+		lines: THREE.LineSegments;
+		mat: THREE.LineBasicMaterial;
+		worldPos: THREE.Vector3;
+	};
+	const cornersGroup = new THREE.Group();
+	terrain.add(cornersGroup);
+	const cornerNodes: Record<CornerKey, CornerNode> = {} as Record<CornerKey, CornerNode>;
+
+	function createPylonGeometry(): THREE.BufferGeometry {
+		const s = 0.026;
+		const h = 0.078;
+		const positions = new Float32Array([
+			-s, -s, 0,  s, -s, 0,
+			 s, -s, 0,  s,  s, 0,
+			 s,  s, 0, -s,  s, 0,
+			-s,  s, 0, -s, -s, 0,
+			-s, -s, 0,  0,  0, h,
+			 s, -s, 0,  0,  0, h,
+			 s,  s, 0,  0,  0, h,
+			-s,  s, 0,  0,  0, h
+		]);
+		const geom = new THREE.BufferGeometry();
+		geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+		return geom;
+	}
+
+	const pylonGeom = createPylonGeometry();
+	const hitGeom = new THREE.BoxGeometry(0.07, 0.07, 0.09);
+	const hitMat = new THREE.MeshBasicMaterial({
+		transparent: true,
+		opacity: 0,
+		depthWrite: false
+	});
+	const cornerConfigs: Array<{ key: CornerKey; x: number; y: number }> = [
+		{ key: 'tl', x: 0, y: 1 },
+		{ key: 'tr', x: 1, y: 1 },
+		{ key: 'bl', x: 0, y: 0 },
+		{ key: 'br', x: 1, y: 0 }
+	];
+
+	cornerConfigs.forEach(({ key, x, y }) => {
+		const color = cornerColors[key];
+		const mat = new THREE.LineBasicMaterial({
+			color: color,
+			transparent: true,
+			opacity: 0.9,
+			fog: true
+		});
+		const lines = new THREE.LineSegments(pylonGeom, mat);
+		const mesh = new THREE.Mesh(hitGeom, hitMat);
+		mesh.position.z = 0.04;
+		const group = new THREE.Group();
+		group.add(lines);
+		group.add(mesh);
+		const worldPos = new THREE.Vector3(x, y, 0.04);
+		group.position.set(x, y, 0);
+		cornersGroup.add(group);
+		cornerNodes[key] = { key, group, mesh, lines, mat, worldPos };
+	});
+	cornersReady = true;
+	syncCornerMaterials();
+
+	function syncCornerMaterials() {
+		(Object.keys(cornerNodes) as CornerKey[]).forEach((key) => {
+			const node = cornerNodes[key];
+			if (!node) return;
+			node.mat.color.copy(cornerColors[key]);
+		});
+	}
+
+	const padCorners = [
+		new THREE.Vector3(0, 0, 0),
+		new THREE.Vector3(1, 0, 0),
+		new THREE.Vector3(0, 1, 0),
+		new THREE.Vector3(1, 1, 0)
+	];
+	const ndcTmp = new THREE.Vector3();
+	const viewDir = new THREE.Vector3();
+
+	function padProjectedBounds() {
+		pivot.updateMatrixWorld(true);
+		camera.updateMatrixWorld(true);
+		let minY = Infinity, maxY = -Infinity;
+		let minX = Infinity, maxX = -Infinity;
+		for (const c of padCorners) {
+			ndcTmp.copy(c);
+			terrain.localToWorld(ndcTmp);
+			ndcTmp.project(camera);
+			minY = Math.min(minY, ndcTmp.y);
+			maxY = Math.max(maxY, ndcTmp.y);
+			minX = Math.min(minX, ndcTmp.x);
+			maxX = Math.max(maxX, ndcTmp.x);
+		}
+		return {
+			minY, maxY,
+			midY: (minY + maxY) * 0.5,
+			spanY: maxY - minY,
+			spanX: maxX - minX
+		};
+	}
+
+	function framePad() {
+		camera.position.set(0, 0.22, 1.4);
+		camLook.set(0, 0, 0);
+		camera.lookAt(camLook);
+
+		for (let i = 0; i < 12; i++) {
+			const bounds = padProjectedBounds();
+			const fill = Math.max(bounds.spanY, bounds.spanX * 0.92);
+			if (fill > 0.05) {
+				const zoom = Math.max(0.65, Math.min(1.55, 1.38 / fill));
+				viewDir.subVectors(camera.position, camLook);
+				camera.position.copy(camLook).addScaledVector(viewDir, 1 / zoom);
+			}
+			camera.lookAt(camLook);
+			const { midY } = padProjectedBounds();
+			camera.position.y += midY * 0.4;
+			camLook.y += midY * 0.4;
+			camera.lookAt(camLook);
+		}
+	}
+
+	function hitPadPlane(ev: PointerEvent): THREE.Vector3 | null {
+		const rect = canvas.getBoundingClientRect();
+		if (rect.width <= 0 || rect.height <= 0) return null;
+		ndc.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+		ndc.y = -(((ev.clientY - rect.top) / rect.height) * 2 - 1);
+		raycaster.setFromCamera(ndc, camera);
+		const planeNormal = new THREE.Vector3(0, 0, 1).applyQuaternion(pivot.quaternion);
+		const planePoint = terrain.localToWorld(new THREE.Vector3(0.5, 0.5, 0));
+		const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal, planePoint);
+		const hit = raycaster.ray.intersectPlane(plane, tmpVec3);
+		return hit ? terrain.worldToLocal(hit.clone()) : null;
+	}
+
 	function syncBufferToCss() {
 		const rect = canvas.getBoundingClientRect();
 		const widthCss = Math.max(1, rect.width);
@@ -233,319 +646,38 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 			bufferW = targetW;
 			bufferH = targetH;
 			renderer.setSize(bufferW, bufferH, false);
-			// update camera aspect ratio dynamically to fill container area
 			camera.aspect = widthCss / heightCss;
 			camera.updateProjectionMatrix();
+			framePad();
 			rebuildLinePositions();
 			renderOnce();
 		}
-	}
-
-	function rebuildLinePositions() {
-		linePositions = new Float32Array(segments.length * 2 * 3);
-		let p = 0;
-		for (let s = 0; s < segments.length; s++) {
-			const [a, b] = segments[s];
-			const ax = normPositions[a * 2 + 0];
-			const ay = normPositions[a * 2 + 1];
-			const bx = normPositions[b * 2 + 0];
-			const by = normPositions[b * 2 + 1];
-			linePositions[p++] = ax; linePositions[p++] = ay; linePositions[p++] = 0;
-			linePositions[p++] = bx; linePositions[p++] = by; linePositions[p++] = 0;
-		}
-		const posAttr = geometry.getAttribute('position') as THREE.BufferAttribute;
-		posAttr.set(linePositions);
-		posAttr.needsUpdate = true;
-		updateColorsAndKnob();
-	}
-
-	function updateColorsAndKnob() {
-		// knob position (world units)
-		const kx = pos.x;
-		const ky = 1 - pos.y; // invert Y so mouse direction matches screen space
-		knob.position.x = kx;
-		knob.position.y = ky;
-
-		// Calcola il colore ciano per la sfera in base al cutoff e alla distanza dal vertice TL
-		const cutoffMin = 200;
-		const cutoffMax = 12000;
-		const cutoffNorm = Math.max(0, Math.min(1, (filterCutoffHz - cutoffMin) / (cutoffMax - cutoffMin)));
-		const cyanIntensity = cutoffNorm * cutoffCornerWeight;
-		const cornerTL = { x: 0, y: 0 };
-		const distTLKnob = Math.sqrt((kx - cornerTL.x) ** 2 + (ky - cornerTL.y) ** 2);
-		const maxDist = Math.sqrt(2);
-		const radialFactorKnob = 1 - Math.min(1, distTLKnob / maxDist);
-		const cyanAmountKnob = cyanIntensity * radialFactorKnob;
-		
-		// Colore base grigio: 0xd0d0d0 = RGB(208, 208, 208) / 255
-		const baseR = 0xd0 / 255;
-		const baseG = 0xd0 / 255;
-		const baseB = 0xd0 / 255;
-		
-		// Applica il ciano (molto più intenso e colorato)
-		// Riduci il rosso completamente quando c'è ciano
-		const knobR = Math.max(0, Math.min(1, baseR * (1 - cyanAmountKnob * 1.2)));
-		// Aumenta verde e blu molto di più, con boost di luminosità
-		const knobG = Math.max(0, Math.min(1, baseG + cyanAmountKnob * 1.0 + cyanAmountKnob * 0.3));
-		const knobB = Math.max(0, Math.min(1, baseB + cyanAmountKnob * 1.2 + cyanAmountKnob * 0.4));
-		
-		// Aggiorna il colore della sfera
-		knobMat.color.setRGB(knobR, knobG, knobB);
-		// Aumenta l'emissività quando c'è ciano per renderla più luminosa
-		if (cyanAmountKnob > 0) {
-			knobMat.emissive.setRGB(knobR * 0.3, knobG * 0.5, knobB * 0.6);
-			knobMat.emissiveIntensity = cyanAmountKnob * 0.8;
-		} else {
-			knobMat.emissive.setRGB(0, 0, 0);
-			knobMat.emissiveIntensity = 0;
-		}
-
-		// attenuation radii
-		const influence = 0.25; // in world units
-		const influenceSq = influence * influence;
-
-		// base terrain ("montagne") parameters
-		const mountainAmp = 0.14;
-		const freq1 = 8.0;
-		const freq2 = 13.0;
-		function baseHeight(x: number, y: number): number {
-			// simple pseudo-fractal waves; centered to [0,1]
-			const w1 = Math.sin((x) * Math.PI * 2 * (freq1 / 10)) * 0.5 + 0.5;
-			const w2 = Math.sin((y) * Math.PI * 2 * (freq1 / 10)) * 0.5 + 0.5;
-			const w3 = Math.sin((x + y) * Math.PI * 2 * (freq2 / 10)) * 0.5 + 0.5;
-			const h = (w1 + w2 + w3) / 3;
-			return (h - 0.5) * 2 * mountainAmp; // static mountains, no continuous motion
-		}
-		
-		// Animazione basata sulla densità: pulsazione ritmica della griglia
-		// La densità va da 1 a 60 grains/sec, normalizziamo per l'animazione
-		const densityNorm = Math.max(0, Math.min(1, (density - 1) / (60 - 1)));
-		const densityIntensity = densityNorm * densityCornerWeight;
-		
-		// Vertice TR (top-right) è a (1, 0) nello spazio normalizzato
-		const cornerTR = { x: 1, y: 0 };
-		
-		function densityPulse(x: number, y: number): number {
-			if (densityIntensity <= 0) return 0;
-			
-			// Calcola distanza dal vertice TR
-			const dx = x - cornerTR.x;
-			const dy = y - cornerTR.y;
-			const dist = Math.sqrt(dx * dx + dy * dy);
-			const maxDist = Math.sqrt(2);
-			const radialFactor = 1 - Math.min(1, dist / maxDist);
-			
-			// Frequenza di pulsazione basata sulla densità (più densità = più veloce)
-			// Normalizza la densità per avere una frequenza ragionevole (0.5-3 Hz)
-			const pulseFreq = 0.5 + densityNorm * 2.5;
-			const pulsePhase = tSec * pulseFreq * Math.PI * 2;
-			
-			// Pulsazione con onda sinusoidale, più intensa vicino al vertice TR
-			const pulse = Math.sin(pulsePhase) * 0.08 * densityIntensity * radialFactor;
-			
-			// Aggiungi anche onde multiple che si propagano dal vertice TR
-			const waveSpeed = 0.8 + densityNorm * 1.2; // velocità onde basata sulla densità
-			const waveLength = 0.15;
-			const wavePhase = (dist / waveLength) - (tSec * waveSpeed);
-			const wave = Math.sin(wavePhase * Math.PI * 2) * 0.04 * densityIntensity * radialFactor;
-			
-			return pulse + wave;
-		}
-		// ripple from knob movement
-		const rippleAmp = 0.04;
-		const rippleWavelength = 0.18; // world units between rings
-		const rippleSpeed = 0.6; // units per second
-		const k = (Math.PI * 2) / rippleWavelength; // spatial frequency
-		const omega = (Math.PI * 2 * rippleSpeed) / rippleWavelength; // temporal frequency
-		function rippleHeight(x: number, y: number): number {
-			const dx = x - rippleOX;
-			const dy = y - rippleOY;
-			const dist = Math.sqrt(dx * dx + dy * dy);
-			const elapsed = Math.max(0, tSec - rippleT0);
-			const phase = k * dist - omega * elapsed;
-			// distance and time decay for a dissipating wave
-			const decay = Math.exp(-dist * 3.0) * Math.exp(-elapsed * 1.2);
-			return rippleAmp * Math.sin(phase) * decay;
-		}
-
-		// Raccogli informazioni sui vertici più influenzati per i simboli
-		type VertexInfluence = { index: number; x: number; y: number; weight: number; z: number };
-		const vertexInfluences: VertexInfluence[] = [];
-		
-		// Usa i vertici della griglia normalizzata
-		for (let i = 0; i < totalPoints; i++) {
-			const x = normPositions[i * 2 + 0];
-			const y = normPositions[i * 2 + 1];
-			const dx = x - kx;
-			const dy = y - ky;
-			const dSq = dx * dx + dy * dy;
-			if (dSq < influenceSq) {
-				const weight = 1 - Math.sqrt(dSq / influenceSq);
-				const z = baseHeight(x, y) + rippleHeight(x, y) + densityPulse(x, y) + 0.18 * weight;
-				vertexInfluences.push({ index: i, x, y, weight, z });
-			}
-		}
-		
-		// Ordina per peso (più influenzati prima) e calcola quanti simboli mostrare in base al riverbero
-		vertexInfluences.sort((a, b) => b.weight - a.weight);
-		// Soglia minima: i poligoni compaiono solo quando il riverbero supera questa soglia
-		const reverbThreshold = 0.3; // soglia minima (0.3 = 30%)
-		const effectiveMix = reverbMix < reverbThreshold 
-			? 0 
-			: (reverbMix - reverbThreshold) / (1 - reverbThreshold); // normalizza tra 0 e 1 dopo la soglia
-		const maxSymbols = Math.floor(effectiveMix * maxSymbolsWhenFull);
-		const topVertices = vertexInfluences.slice(0, maxSymbols);
-		
-		// Aggiorna o crea simboli per i vertici più influenzati
-		while (activeSymbols.length < topVertices.length) {
-			const shapeType = activeSymbols.length;
-			const symbol = createSymbol(shapeType);
-			symbolsGroup.add(symbol);
-			activeSymbols.push({
-				mesh: symbol,
-				vertexIndex: -1,
-				baseX: 0,
-				baseY: 0
-			});
-		}
-		
-		// Hide unused symbols (Object Pooling: Don't destroy, just hide)
-		for (let i = topVertices.length; i < activeSymbols.length; i++) {
-            activeSymbols[i].mesh.visible = false;
-        }
-		
-		// Aggiorna posizioni e proprietà dei simboli attivi
-		for (let i = 0; i < topVertices.length; i++) {
-			const vertex = topVertices[i];
-			const symbol = activeSymbols[i];
-            
-            symbol.mesh.visible = true;
-			
-			// Posiziona il simbolo sopra il vertice
-			symbol.mesh.position.x = vertex.x;
-			symbol.mesh.position.y = vertex.y;
-			symbol.mesh.position.z = vertex.z + 0.05; // leggermente sopra il vertice
-			
-			// Scala in base al peso (più influenzato = più grande)
-			const scale = 0.5 + vertex.weight * 1.5;
-			symbol.mesh.scale.set(scale, scale, scale);
-			
-			// Rotazione animata in base al tempo e al peso
-			symbol.mesh.rotation.z = tSec * (0.5 + vertex.weight * 2) + i * 0.5;
-			symbol.mesh.rotation.y = tSec * (0.3 + vertex.weight * 1.5);
-			
-			// Opacità e colore in base al peso
-			const mat = symbol.mesh.material as THREE.MeshStandardMaterial;
-			mat.opacity = 0.4 + vertex.weight * 0.6;
-			
-			// Colore in base al peso — tonalità siena/rame
-			const hue = 0.06 + vertex.weight * 0.05; // da arancio a rame
-			const saturation = 0.55 + vertex.weight * 0.35;
-			const lightness = 0.38 + vertex.weight * 0.35;
-			mat.color.setHSL(hue, saturation, lightness);
-			mat.emissive.setHSL(hue, saturation * 0.5, lightness * 0.2);
-		}
-
-		// For each vertex compute height and brightness based on distance to knob
-		// Enhanced contrast for neumorphic effect
-		let c = 0;
-		let p = 0;
-		
-		for (let s = 0; s < segments.length; s++) {
-			// endpoint 1
-			const x1 = linePositions[p + 0];
-			const y1 = linePositions[p + 1];
-			const dx1 = x1 - kx, dy1 = y1 - ky;
-			const d1 = dx1 * dx1 + dy1 * dy1;
-			const w1 = d1 < influenceSq ? 1 - Math.sqrt(d1 / influenceSq) : 0;
-			// Increased contrast range for more pronounced neumorphic depth (darker shadows, brighter highlights)
-			const minI = 0.12, maxI = 0.95;
-			const i1 = minI + (maxI - minI) * w1;
-			const z1 = baseHeight(x1, y1) + rippleHeight(x1, y1) + densityPulse(x1, y1) + 0.18 * w1; // mountains + ripple + density pulse + interactive peak
-			linePositions[p + 2] = z1;
-
-			// endpoint 2
-			const x2 = linePositions[p + 3];
-			const y2 = linePositions[p + 4];
-			const dx2 = x2 - kx, dy2 = y2 - ky;
-			const d2 = dx2 * dx2 + dy2 * dy2;
-			const w2 = d2 < influenceSq ? 1 - Math.sqrt(d2 / influenceSq) : 0;
-			// Same enhanced contrast for endpoint 2
-			const i2 = minI + (maxI - minI) * w2;
-			const z2 = baseHeight(x2, y2) + rippleHeight(x2, y2) + densityPulse(x2, y2) + 0.18 * w2;
-			linePositions[p + 5] = z2;
-
-			// Calcola distanza radiale dal vertice TL per endpoint 1
-			const distTL1 = Math.sqrt((x1 - cornerTL.x) ** 2 + (y1 - cornerTL.y) ** 2);
-			const maxDist = Math.sqrt(2); // distanza massima (diagonale da TL a BR)
-			const radialFactor1 = 1 - Math.min(1, distTL1 / maxDist); // 1 al vertice TL, 0 al vertice opposto
-			const cyanAmount1 = cyanIntensity * radialFactor1;
-
-			// Calcola distanza radiale dal vertice TL per endpoint 2
-			const distTL2 = Math.sqrt((x2 - cornerTL.x) ** 2 + (y2 - cornerTL.y) ** 2);
-			const radialFactor2 = 1 - Math.min(1, distTL2 / maxDist);
-			const cyanAmount2 = cyanIntensity * radialFactor2;
-
-			// Mescola il colore grigio con il ciano (ciano = RGB(0, 1, 1)) - molto più intenso e colorato
-			// Riduci il rosso completamente quando c'è ciano, aumenta verde e blu con boost di luminosità
-			const r1 = Math.max(0, Math.min(1, i1 * (1 - cyanAmount1 * 1.2))); // riduci rosso completamente
-			const g1 = Math.max(0, Math.min(1, i1 + cyanAmount1 * 1.0 + cyanAmount1 * 0.3)); // aumenta verde molto di più con luminosità
-			const b1 = Math.max(0, Math.min(1, i1 + cyanAmount1 * 1.2 + cyanAmount1 * 0.4)); // aumenta blu molto di più con luminosità
-			
-			const r2 = Math.max(0, Math.min(1, i2 * (1 - cyanAmount2 * 1.2)));
-			const g2 = Math.max(0, Math.min(1, i2 + cyanAmount2 * 1.0 + cyanAmount2 * 0.3));
-			const b2 = Math.max(0, Math.min(1, i2 + cyanAmount2 * 1.2 + cyanAmount2 * 0.4));
-
-			// encode color with cyan tint
-			lineColors[c++] = Math.max(0, Math.min(1, r1)); 
-			lineColors[c++] = Math.max(0, Math.min(1, g1)); 
-			lineColors[c++] = Math.max(0, Math.min(1, b1));
-			lineColors[c++] = Math.max(0, Math.min(1, r2)); 
-			lineColors[c++] = Math.max(0, Math.min(1, g2)); 
-			lineColors[c++] = Math.max(0, Math.min(1, b2));
-			p += 6;
-		}
-		// push updated positions and colors
-		const posAttr = geometry.getAttribute('position') as THREE.BufferAttribute;
-		posAttr.set(linePositions);
-		posAttr.needsUpdate = true;
-		const colAttr = geometry.getAttribute('color') as THREE.BufferAttribute;
-		colAttr.set(lineColors);
-		colAttr.needsUpdate = true;
-
-		(material as any).opacity = 0.9;
 	}
 
 	function renderOnce() {
 		syncBufferToCss();
 		updateCornerAnimations();
 		updateCornerSelectPositions();
-		// Tilt the whole scene slightly to get a horizon look
-		scene.rotation.x = -0.9;
 		renderer.render(scene, camera);
 	}
 
 	let animId: number | null = null;
 	let animating = false;
 	let hasActiveGhosts = false;
-	const maxRippleDuration = 3.0; // seconds
+	let lastFrame = performance.now();
 	function animate() {
-		tSec = (performance.now() - tStart) / 1000;
-		const elapsed = Math.max(0, tSec - rippleT0);
+		const now = performance.now();
+		const dt = Math.min(0.05, (now - lastFrame) / 1000);
+		lastFrame = now;
+		tSec = (now - tStart) / 1000;
 		syncBufferToCss();
 		updateColorsAndKnob();
+		updateRain(dt);
 		updateCornerAnimations();
 		updateCornerSelectPositions();
-		scene.rotation.x = -0.9;
 		renderer.render(scene, camera);
-		// Continua l'animazione se c'è un ripple attivo, animazione della densità, vertice hovered o ghost attivi
-		const hasDensityAnimation = densityCornerWeight > 0;
-		if (elapsed < maxRippleDuration || hasDensityAnimation || hasActiveGhosts || dragging || hoveredCorner !== null) {
-			animId = requestAnimationFrame(animate) as any as number;
-		} else {
-			animId = null;
-			animating = false;
-		}
+		animId = requestAnimationFrame(animate) as unknown as number;
+		animating = true;
 	}
 
 	function clamp(v: number, min: number, max: number) { return Math.max(min, Math.min(max, v)); }
@@ -553,70 +685,22 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 	function setPosition(x: number, y: number) {
 		pos.x = clamp(x, 0, 1);
 		pos.y = clamp(y, 0, 1);
-		updateColorsAndKnob();
-		// Re-render immediately while dragging to keep the knob visually in sync
-		renderOnce();
+		if (!animating) {
+			updateColorsAndKnob();
+			renderOnce();
+		}
 		emit();
 	}
 	function getPosition() { return { ...pos }; }
-    
-    // Silent update (only visual, no emit) - for programmatic recall
-    function setPositionSilent(x: number, y: number) {
+
+	function setPositionSilent(x: number, y: number) {
 		pos.x = clamp(x, 0, 1);
 		pos.y = clamp(y, 0, 1);
-		updateColorsAndKnob();
-		renderOnce();
-    }
-
-	// 3D Corner Vertices Group & Meshes
-	const cornersGroup = new THREE.Group();
-	scene.add(cornersGroup);
-
-	type CornerKey = 'tl' | 'tr' | 'bl' | 'br';
-	type CornerNode = {
-		key: CornerKey;
-		mesh: THREE.Mesh;
-		mat: THREE.MeshStandardMaterial;
-		worldPos: THREE.Vector3;
-	};
-
-	const cornerNodes: Record<CornerKey, CornerNode> = {} as any;
-	const cornerConfigs: Array<{ key: CornerKey; x: number; y: number; color: number }> = [
-		{ key: 'tl', x: 0, y: 1, color: 0x7EB4D8 }, // Top-Left (steel blue)
-		{ key: 'tr', x: 1, y: 1, color: 0x7EB87E }, // Top-Right (sage green)
-		{ key: 'bl', x: 0, y: 0, color: 0xA880C0 }, // Bottom-Left (dusty violet)
-		{ key: 'br', x: 1, y: 0, color: 0xC4703A }, // Bottom-Right (copper/accent)
-	];
-
-	// Small wireframe sphere geometry for each corner vertex
-	const cornerGeom = new THREE.SphereGeometry(0.035, 12, 10);
-
-	cornerConfigs.forEach(({ key, x, y, color }) => {
-		const mat = new THREE.MeshStandardMaterial({
-			color: color,
-			emissive: color,
-			emissiveIntensity: 0.4,
-			wireframe: true,
-			transparent: true,
-			opacity: 0.85
-		});
-		const mesh = new THREE.Mesh(cornerGeom, mat);
-
-		const group = new THREE.Group();
-		group.add(mesh);
-		
-		// Position at corner vertex
-		const worldPos = new THREE.Vector3(x, y, 0.04);
-		group.position.copy(worldPos);
-		cornersGroup.add(group);
-
-		cornerNodes[key] = {
-			key,
-			mesh,
-			mat,
-			worldPos
-		};
-	});
+		if (!animating) {
+			updateColorsAndKnob();
+			renderOnce();
+		}
+	}
 
 	let cornerClickCb: ((cornerKey: CornerKey, ev: PointerEvent) => void) | null = null;
 	function onCornerClick(cb: (cornerKey: CornerKey, ev: PointerEvent) => void) {
@@ -624,11 +708,6 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 	}
 
 	let hoveredCorner: CornerKey | null = null;
-
-	// Raycasting helpers to map pointer to the tilted plane in perspective
-	const raycaster = new THREE.Raycaster();
-	const ndc = new THREE.Vector2();
-	const tmpVec3 = new THREE.Vector3();
 
 	function checkCornerHover(ev: PointerEvent): CornerKey | null {
 		const rect = canvas.getBoundingClientRect();
@@ -646,60 +725,30 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 			}
 		}
 
-		// Also allow hitting near corner points via plane distance
-		const planeNormal = new THREE.Vector3(0, 0, 1).applyQuaternion(scene.quaternion);
-		const planePoint = scene.localToWorld(new THREE.Vector3(0, 0, 0));
-		const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal, planePoint);
-		const hit = raycaster.ray.intersectPlane(plane, tmpVec3);
-		if (hit) {
-			const local = scene.worldToLocal(hit.clone());
-			const hitX = local.x;
-			const hitY = local.y;
-			const threshold = 0.12; // 12% corner hit zone radius
+		const local = hitPadPlane(ev);
+		if (local) {
+			const threshold = 0.12;
 			for (const node of Object.values(cornerNodes)) {
-				const dx = hitX - node.worldPos.x;
-				const dy = hitY - node.worldPos.y;
-				if (Math.sqrt(dx * dx + dy * dy) < threshold) {
-					return node.key;
-				}
+				const dx = local.x - node.worldPos.x;
+				const dy = local.y - node.worldPos.y;
+				if (Math.sqrt(dx * dx + dy * dy) < threshold) return node.key;
 			}
 		}
 		return null;
 	}
 
 	function updateCornerAnimations() {
-		const now = tSec;
 		Object.values(cornerNodes).forEach((node) => {
 			const isHovered = hoveredCorner === node.key;
-			
-			// Gentle rotation for the wireframe sphere
-			node.mesh.rotation.y = now * 0.8 + (node.key === 'tl' ? 0 : node.key === 'tr' ? 1 : node.key === 'bl' ? 2 : 3);
-			node.mesh.rotation.x = now * 0.4;
-
-			const targetScale = isHovered ? 1.4 : 1.0 + Math.sin(now * 3) * 0.05;
-			node.mesh.scale.setScalar(targetScale);
-
-			node.mat.emissiveIntensity = isHovered ? 0.9 : 0.4 + Math.sin(now * 4) * 0.1;
-			node.mat.opacity = isHovered ? 1.0 : 0.85;
+			node.group.scale.setScalar(isHovered ? 1.28 : 1.0);
+			node.mat.opacity = isHovered ? 1 : 0.88;
 		});
 	}
 
 	function pointerToPos(ev: PointerEvent) {
-		const rect = canvas.getBoundingClientRect();
-		if (rect.width <= 0 || rect.height <= 0) return { x: pos.x, y: pos.y };
-		ndc.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
-		ndc.y = -(((ev.clientY - rect.top) / rect.height) * 2 - 1);
-		raycaster.setFromCamera(ndc, camera);
-		// world-space plane for grid's local z=0
-		const planeNormal = new THREE.Vector3(0, 0, 1).applyQuaternion(scene.quaternion);
-		const planePoint = scene.localToWorld(new THREE.Vector3(0, 0, 0));
-		const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal, planePoint);
-		const hit = raycaster.ray.intersectPlane(plane, tmpVec3);
-		if (!hit) return { x: pos.x, y: pos.y };
-		const local = scene.worldToLocal(hit.clone());
-		const x = clamp(local.x, 0, 1);
-		const y = clamp(1 - local.y, 0, 1); // invert Y to keep UI origin at top
-		return { x, y };
+		const local = hitPadPlane(ev);
+		if (!local) return { x: pos.x, y: pos.y };
+		return { x: clamp(local.x, 0, 1), y: clamp(1 - local.y, 0, 1) };
 	}
 
 	let pointerDownCorner: CornerKey | null = null;
@@ -712,7 +761,7 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 		}
 		pointerDownCorner = null;
 		dragging = true;
-		(canvas as any).setPointerCapture?.(ev.pointerId);
+		(canvas as HTMLCanvasElement & { setPointerCapture?: (id: number) => void }).setPointerCapture?.(ev.pointerId);
 		const p = pointerToPos(ev);
 		setPosition(p.x, p.y);
 	}
@@ -722,12 +771,8 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 		if (corner !== hoveredCorner) {
 			hoveredCorner = corner;
 			canvas.style.cursor = corner ? 'pointer' : 'crosshair';
-			if (!animating) {
-				animating = true;
-				animate();
-			}
+			renderOnce();
 		}
-
 		if (!dragging) return;
 		const p = pointerToPos(ev);
 		setPosition(p.x, p.y);
@@ -745,8 +790,7 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 
 		if (!dragging) return;
 		dragging = false;
-		(canvas as any).releasePointerCapture?.(ev.pointerId);
-		// start ripple on release from current position
+		(canvas as HTMLCanvasElement & { releasePointerCapture?: (id: number) => void }).releasePointerCapture?.(ev.pointerId);
 		rippleOX = pos.x;
 		rippleOY = 1 - pos.y;
 		rippleT0 = tSec;
@@ -765,7 +809,6 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 		onPointerUp(ev);
 	});
 
-	// Smooth keyboard navigation: hold arrows to move continuously with RAF
 	const kbPressed = new Set<string>();
 	let kbAnimId: number | null = null;
 	let kbLastTs = 0;
@@ -775,21 +818,18 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 		if (!hasArrow) { kbAnimId = null; return; }
 		const dt = Math.max(0, Math.min(0.05, (ts - kbLastTs) / 1000));
 		kbLastTs = ts;
-		const speed = kbPressed.has('Shift') ? shiftSpeed : normalSpeed; // units per second
+		const speed = kbPressed.has('Shift') ? shiftSpeed : normalSpeed;
 		let dx = 0, dy = 0;
 		if (kbPressed.has('ArrowLeft')) dx -= 1;
 		if (kbPressed.has('ArrowRight')) dx += 1;
 		if (kbPressed.has('ArrowUp')) dy -= 1;
 		if (kbPressed.has('ArrowDown')) dy += 1;
 		if (dx !== 0 || dy !== 0) {
-			// Normalize diagonal speed
 			if (dx !== 0 && dy !== 0) { const inv = 1 / Math.sqrt(2); dx *= inv; dy *= inv; }
-			const nx = pos.x + dx * speed * dt;
-			const ny = pos.y + dy * speed * dt;
-			setPosition(nx, ny);
+			setPosition(pos.x + dx * speed * dt, pos.y + dy * speed * dt);
 			kbMoved = true;
 		}
-		kbAnimId = requestAnimationFrame(kbLoop) as any as number;
+		kbAnimId = requestAnimationFrame(kbLoop) as unknown as number;
 	}
 	function onKeyDown(ev: KeyboardEvent) {
 		if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight' || ev.key === 'ArrowUp' || ev.key === 'ArrowDown' || ev.key === 'Shift') {
@@ -798,7 +838,7 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 			if (kbAnimId == null) {
 				kbMoved = false;
 				kbLastTs = performance.now();
-				kbAnimId = requestAnimationFrame(kbLoop) as any as number;
+				kbAnimId = requestAnimationFrame(kbLoop) as unknown as number;
 			}
 		}
 	}
@@ -806,7 +846,6 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 		if (kbPressed.has(ev.key)) kbPressed.delete(ev.key);
 		const hasArrow = kbPressed.has('ArrowLeft') || kbPressed.has('ArrowRight') || kbPressed.has('ArrowUp') || kbPressed.has('ArrowDown');
 		if (!hasArrow && kbAnimId != null) {
-			// stop loop; optionally trigger ripple if there was movement
 			cancelAnimationFrame(kbAnimId);
 			kbAnimId = null;
 			if (kbMoved) {
@@ -825,7 +864,7 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 	function emit() { cb?.(getPosition()); }
 
 	function updateCornerSelectPositions() {
-		// Corner selectors are now housed inside the Legend Panel (.xy-legend-panel)
+		// Corner selectors live in the legend panel
 	}
 
 	function setCornerLabels(l: CornerLabels) {
@@ -838,10 +877,14 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 	});
 	try { ro.observe(canvas); } catch {}
 
-	// Initial
+	updateFog();
 	syncBufferToCss();
 	updateColorsAndKnob();
 	renderOnce();
+	if (!animating) {
+		animating = true;
+		animate();
+	}
 
 	function setSpeed(normal: number, shift: number) {
 		normalSpeed = Math.max(0.01, Math.min(2.0, normal));
@@ -850,49 +893,48 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 
 	function setReverbMix(mix: number) {
 		reverbMix = Math.max(0, Math.min(1, mix));
-		// Aggiorna i simboli quando cambia il riverbero
-		updateColorsAndKnob();
-		renderOnce();
+		updateFog();
+		if (!animating) renderOnce();
 	}
 
 	function setFilterCutoff(cutoff: number, cornerWeight: number) {
 		filterCutoffHz = Math.max(200, Math.min(12000, cutoff));
 		cutoffCornerWeight = Math.max(0, Math.min(1, cornerWeight));
-		// Aggiorna i colori quando cambia il cutoff
-		updateColorsAndKnob();
-		renderOnce();
+		if (!animating) {
+			updateColorsAndKnob();
+			renderOnce();
+		}
 	}
 
 	function setDensity(dens: number, cornerWeight: number) {
 		density = Math.max(1, Math.min(60, dens));
 		densityCornerWeight = Math.max(0, Math.min(1, cornerWeight));
-		// Aggiorna l'animazione quando cambia la densità
-		updateColorsAndKnob();
-		// Se l'animazione non è già attiva, avviala per mostrare l'effetto della densità
 		if (!animating && densityCornerWeight > 0) {
 			animating = true;
 			animate();
 		}
-		renderOnce();
+		if (!animating) {
+			updateColorsAndKnob();
+			renderOnce();
+		}
 	}
 
 	function updateTheme() {
-		updateClearColor();
+		readThemeColors();
+		updateColorsAndKnob();
 		renderOnce();
 	}
 
-    function setGhostPositions(positions: { x: number, y: number, colorIndex: number }[]) {
-        hasActiveGhosts = positions.length > 0;
-        updateGhosts(positions);
-        if (hasActiveGhosts && !animating) {
-            animating = true;
-            animate();
-        } else {
-            renderOnce();
-        }
-    }
+	function setGhostPositions(positions: { x: number; y: number; colorIndex: number }[]) {
+		hasActiveGhosts = positions.length > 0;
+		updateGhosts(positions);
+		if (hasActiveGhosts && !animating) {
+			animating = true;
+			animate();
+		} else {
+			renderOnce();
+		}
+	}
 
 	return { setPosition, getPosition, onChange, setCornerLabels, setSpeed, setReverbMix, setFilterCutoff, setDensity, updateTheme, setPositionSilent, setGhostPositions, onCornerClick };
 }
-
-

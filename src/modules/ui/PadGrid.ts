@@ -19,11 +19,17 @@ export const PAD_ICONS = [
 	'<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="2"/>'
 ];
 
+const PLUS_ICON = '<line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line>';
+
 type PadGridOptions = {
 	colors?: string[];
 	activeIndex?: number | null;
 	maxPads?: number;
 };
+
+function svgMarkup(content: string, opacity = 0.6) {
+	return `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:${opacity}">${content}</svg>`;
+}
 
 export function createPadGrid(container: HTMLElement, regions: Array<Region | null>, opts: PadGridOptions = {}) {
 	const pads: HTMLDivElement[] = [];
@@ -38,49 +44,70 @@ export function createPadGrid(container: HTMLElement, regions: Array<Region | nu
 		onAdd?: () => void;
 	} = {};
 
-	function render() {
-		for (let i = 0; i < regions.length; i++) {
-			const pad = document.createElement('div');
-			pad.className = 'pad' + (regions[i] ? ' assigned' : '') + (i === activeIndex ? ' active' : '');
-			
-			// Determine icon and color index
-			// If region has explicit iconIndex, use that. Otherwise use pad index.
-			const visualIndex = regions[i]?.iconIndex !== undefined ? regions[i]!.iconIndex! : i;
-			
-			const color = colors[visualIndex % colors.length] || '';
-			const iconContent = PAD_ICONS[visualIndex % PAD_ICONS.length];
+	function makeTile(kind: 'pad' | 'add' | 'locked', index: number) {
+		const tile = document.createElement('div');
+		const region = kind === 'pad' ? regions[index] : null;
+		const isActive = kind === 'pad' && index === activeIndex;
+		tile.className = 'param-tile pad-slot'
+			+ (kind === 'pad' ? ' pad' : '')
+			+ (region ? ' assigned' : '')
+			+ (isActive ? ' active' : '')
+			+ (kind === 'add' ? ' add-pad-btn' : '')
+			+ (kind === 'locked' ? ' is-disabled' : '');
+		tile.dataset.index = String(index);
 
-			if (color) {
-				pad.style.borderColor = color;
-				pad.style.color = regions[i] ? color : pad.style.color;
-				pad.style.boxShadow = i === activeIndex ? `0 0 0 2px ${color}66 inset` : '';
-			}
-			
-			pad.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.6">${iconContent}</svg>`;
-			if (regions[i]?.name) {
-				pad.title = regions[i]!.name!;
-			}
+		const visualIndex = region?.iconIndex !== undefined ? region.iconIndex : index;
+		const color = colors.length ? colors[visualIndex % colors.length] : '';
+		const header = `PAD ${index + 1}`;
+		const value = kind === 'locked'
+			? '—'
+			: kind === 'add'
+				? 'ADD'
+				: (region?.name || (region ? 'SET' : 'EMPTY'));
+		const icon = kind === 'locked'
+			? ''
+			: kind === 'add'
+				? svgMarkup(PLUS_ICON, 0.45)
+				: svgMarkup(PAD_ICONS[visualIndex % PAD_ICONS.length], region ? 0.85 : 0.4);
 
-			pad.dataset.index = String(i);
-			wire(pad, i);
-			pads.push(pad);
-			container.appendChild(pad);
+		tile.innerHTML = `<div class="tile-header">${header}</div><div class="pad-well">${icon}</div><div class="tile-value">${value}</div>`;
+
+		if (color && kind === 'pad') {
+			tile.style.borderColor = isActive ? color : '';
+			const well = tile.querySelector('.pad-well') as HTMLElement | null;
+			if (well) {
+				well.style.borderColor = color;
+				well.style.color = region ? color : '';
+			}
+			if (isActive) {
+				tile.style.boxShadow = `inset 0 0 0 1px ${color}66`;
+			}
 		}
 
-		// Add button (only if under maxPads)
-		if (regions.length < maxPads) {
-			const addBtn = document.createElement('div');
-			addBtn.className = 'pad add-pad-btn';
-			addBtn.title = 'Add Pad';
-			addBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.4"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`;
-			addBtn.style.borderStyle = 'dashed';
-			addBtn.style.opacity = '0.7';
-			addBtn.addEventListener('click', () => {
-				if (regions.length < maxPads) {
-					callbacks.onAdd?.();
-				}
-			});
-			container.appendChild(addBtn);
+		if (region?.name) tile.title = region.name;
+		else if (kind === 'add') tile.title = 'Add Pad';
+		else if (kind === 'locked') tile.title = 'Locked slot';
+
+		return tile;
+	}
+
+	function render() {
+		const slotCount = Number.isFinite(maxPads) ? maxPads : regions.length + 1;
+		for (let i = 0; i < slotCount; i++) {
+			if (i < regions.length) {
+				const tile = makeTile('pad', i);
+				wire(tile, i);
+				pads.push(tile);
+				container.appendChild(tile);
+			} else if (i === regions.length && regions.length < maxPads) {
+				const addBtn = makeTile('add', i);
+				addBtn.addEventListener('click', () => {
+					if (regions.length < maxPads) callbacks.onAdd?.();
+				});
+				container.appendChild(addBtn);
+			} else {
+				container.appendChild(makeTile('locked', i));
+			}
 		}
 	}
 
@@ -93,7 +120,6 @@ export function createPadGrid(container: HTMLElement, regions: Array<Region | nu
 			longPressTimer = window.setTimeout(() => {
 				if (pressed) {
 					longPressed = true;
-					// prevent subsequent short press on release
 					pressed = false;
 					callbacks.onPadLongPress?.(index);
 				}
