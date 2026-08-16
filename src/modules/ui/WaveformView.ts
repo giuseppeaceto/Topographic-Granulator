@@ -25,6 +25,7 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 	let regionRange: { start: number; end: number } | null = null;
 	let dragMarkerId: string | null = null;
 	let playheadSec: number | null = null;
+	let liveTimes: Map<string, number> | null = null;
 
 	let cachedResample: Float32Array | null = null;
 	let cachedWidth = 0;
@@ -41,6 +42,7 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 		activeMarkerId = null;
 		selectedMarkerId = null;
 		playheadSec = null;
+		liveTimes = null;
 		draw();
 	}
 
@@ -293,7 +295,11 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 		const sorted = sortMarkers(markers);
 
 		sorted.forEach((m, i) => {
-			const x = timeToX(m.timeSec);
+			const homeX = timeToX(m.timeSec);
+			const liveSec = liveTimes?.get(m.id);
+			const liveX = liveSec != null ? timeToX(liveSec) : homeX;
+			const drifting = liveSec != null && Math.abs(liveSec - m.timeSec) > 0.0008;
+			const x = drifting ? liveX : homeX;
 			const inRegion = !regionRange
 				|| (m.timeSec >= Math.min(regionRange.start, regionRange.end)
 					&& m.timeSec <= Math.max(regionRange.start, regionRange.end));
@@ -302,6 +308,18 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 
 			ctx2d.save();
 			ctx2d.globalAlpha = inRegion ? 1 : 0.32;
+			if (drifting) {
+				ctx2d.strokeStyle = hexToRgba(markerColor, 0.28);
+				ctx2d.lineWidth = 1;
+				ctx2d.beginPath();
+				ctx2d.moveTo(homeX, 0);
+				ctx2d.lineTo(homeX, h);
+				ctx2d.stroke();
+				ctx2d.fillStyle = hexToRgba(markerColor, 0.45);
+				ctx2d.beginPath();
+				ctx2d.arc(homeX, 7, 2.4, 0, Math.PI * 2);
+				ctx2d.fill();
+			}
 			ctx2d.strokeStyle = markerColor;
 			ctx2d.lineWidth = isActive ? 2 : 1.25;
 			ctx2d.beginPath();
@@ -311,7 +329,7 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 
 			const capY = 7;
 			const hold = Math.max(0, m.hold ?? 0);
-			const capR = isActive ? 5 : (hold > 0 ? 4.2 : 3.5);
+			const capR = isActive ? 5 : (hold > 0 || drifting ? 4.2 : 3.5);
 			if (isActive) {
 				ctx2d.fillStyle = hexToRgba(markerColor, 0.28);
 				ctx2d.beginPath();
@@ -583,6 +601,26 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 			if (timeSec == null && playheadSec == null) return;
 			if (timeSec != null && playheadSec != null && Math.abs(timeSec - playheadSec) < 0.0008) return;
 			playheadSec = timeSec;
+			draw();
+		},
+		setPlaybackVisual: (timeSec: number | null, live: Map<string, number> | null) => {
+			const playUnchanged = (timeSec == null && playheadSec == null)
+				|| (timeSec != null && playheadSec != null && Math.abs(timeSec - playheadSec) < 0.0008);
+			let liveUnchanged = false;
+			if (!live && !liveTimes) liveUnchanged = true;
+			else if (live && liveTimes && live.size === liveTimes.size) {
+				liveUnchanged = true;
+				for (const [id, sec] of live) {
+					const prev = liveTimes.get(id);
+					if (prev == null || Math.abs(prev - sec) > 0.0008) {
+						liveUnchanged = false;
+						break;
+					}
+				}
+			}
+			if (playUnchanged && liveUnchanged) return;
+			playheadSec = timeSec;
+			liveTimes = live;
 			draw();
 		},
 		setSelectedMarkerId: (id: string | null) => {

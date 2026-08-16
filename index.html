@@ -480,10 +480,22 @@
                         <div class="tile-value" data-val="marker-euclid-steps">8</div>
                       </div>
                     </div>
-                    <div id="markerHoldTile" class="param-tile is-disabled" data-tile="marker-hold">
-                      <div class="tile-header">HOLD</div>
-                      <div class="knob" data-knob="marker-hold" data-tooltip="Extra steps to stay on the selected marker (0-8). Select a marker on the waveform"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
-                      <div class="tile-value" data-val="marker-hold">—</div>
+                    <div id="markerPerMarkerRow" class="param-grid-2col">
+                      <div id="markerHoldTile" class="param-tile is-disabled" data-tile="marker-hold">
+                        <div class="tile-header">HOLD</div>
+                        <div class="knob" data-knob="marker-hold" data-tooltip="Extra steps to stay on the selected marker (0-8). Select a marker on the waveform"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                        <div class="tile-value" data-val="marker-hold">—</div>
+                      </div>
+                      <div id="markerDriftTile" class="param-tile is-disabled" data-tile="marker-drift">
+                        <div class="tile-header">DRIFT</div>
+                        <div class="knob" data-knob="marker-drift" data-tooltip="How far the selected marker breathes around its home (0-400ms). Home stays put"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                        <div class="tile-value" data-val="marker-drift">—</div>
+                      </div>
+                    </div>
+                    <div id="markerDriftSpeedTile" class="param-tile is-disabled" data-tile="marker-drift-speed">
+                      <div class="tile-header">SPEED</div>
+                      <div class="knob" data-knob="marker-drift-speed" data-tooltip="Drift cycle speed. Slow = 30s breath, fast = 2.5s"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                      <div class="tile-value" data-val="marker-drift-speed">—</div>
                     </div>
                   </div>
                 </div>

@@ -1,7 +1,17 @@
 export const MAX_MARKERS = 16;
 export const MAX_MARKER_HOLD = 8;
+export const MAX_MARKER_DRIFT_MS = 400;
+export const MIN_MARKER_DRIFT_HZ = 0.03;
+export const MAX_MARKER_DRIFT_HZ = 0.4;
+export const DEFAULT_MARKER_DRIFT_HZ = 0.08;
 
-export type Marker = { id: string; timeSec: number; hold?: number };
+export type Marker = {
+	id: string;
+	timeSec: number;
+	hold?: number;
+	driftMs?: number;
+	driftHz?: number;
+};
 
 export type MarkerOrder = 'forward' | 'reverse' | 'pingpong' | 'random' | 'shuffle' | 'wander';
 export type MarkerGrainMode = 'cloud' | 'pulse' | 'glide' | 'stutter' | 'flam' | 'bloom';
@@ -74,6 +84,61 @@ export function setMarkerHold(seq: MarkerSeqParams, id: string, hold: number): M
 		...seq,
 		markers: seq.markers.map(m => (m.id === id ? { ...m, hold: nextHold } : m))
 	};
+}
+
+export function markerDriftMs(marker: Marker): number {
+	const v = marker.driftMs ?? 0;
+	if (!Number.isFinite(v)) return 0;
+	return Math.max(0, Math.min(MAX_MARKER_DRIFT_MS, v));
+}
+
+export function markerDriftHz(marker: Marker): number {
+	const v = marker.driftHz ?? DEFAULT_MARKER_DRIFT_HZ;
+	if (!Number.isFinite(v)) return DEFAULT_MARKER_DRIFT_HZ;
+	return Math.max(MIN_MARKER_DRIFT_HZ, Math.min(MAX_MARKER_DRIFT_HZ, v));
+}
+
+export function setMarkerDrift(
+	seq: MarkerSeqParams,
+	id: string,
+	patch: { driftMs?: number; driftHz?: number }
+): MarkerSeqParams {
+	return {
+		...seq,
+		markers: seq.markers.map(m => {
+			if (m.id !== id) return m;
+			const next = { ...m };
+			if (patch.driftMs !== undefined) {
+				next.driftMs = Math.max(0, Math.min(MAX_MARKER_DRIFT_MS, patch.driftMs));
+			}
+			if (patch.driftHz !== undefined) {
+				next.driftHz = Math.max(MIN_MARKER_DRIFT_HZ, Math.min(MAX_MARKER_DRIFT_HZ, patch.driftHz));
+			}
+			return next;
+		})
+	};
+}
+
+function markerPhase(id: string): number {
+	let h = 0;
+	for (let i = 0; i < id.length; i++) {
+		h = (Math.imul(h, 31) + id.charCodeAt(i)) | 0;
+	}
+	return ((h >>> 0) % 1000) / 1000 * Math.PI * 2;
+}
+
+export function driftedMarkerTime(
+	marker: Marker,
+	nowSec: number,
+	lo: number,
+	hi: number
+): number {
+	const depth = markerDriftMs(marker) / 1000;
+	const home = marker.timeSec;
+	if (depth <= 0) return Math.max(lo, Math.min(hi, home));
+	const hz = markerDriftHz(marker);
+	const offset = depth * Math.sin((Math.PI * 2) * hz * nowSec + markerPhase(marker.id));
+	return Math.max(lo, Math.min(hi, home + offset));
 }
 
 export function sortMarkers(markers: Marker[]): Marker[] {

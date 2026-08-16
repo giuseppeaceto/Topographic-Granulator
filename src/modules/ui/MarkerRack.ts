@@ -5,7 +5,7 @@ import type {
 	MarkerRate,
 	MarkerSeqParams
 } from '../editor/MarkerStore';
-import { isAbsoluteRate, markerHold, patternUsesGridKnobs, sortMarkers } from '../editor/MarkerStore';
+import { isAbsoluteRate, markerDriftMs, markerHold, patternUsesGridKnobs, sortMarkers } from '../editor/MarkerStore';
 import type { MarkerLaneVisual } from '../audio/MarkerSequencer';
 
 const ORDER_VALUES: MarkerOrder[] = ['forward', 'reverse', 'pingpong', 'wander', 'random', 'shuffle'];
@@ -32,6 +32,8 @@ export function createMarkerRack(config: {
 	const clearBtn = document.getElementById('markerClearBtn') as HTMLButtonElement | null;
 	const euclidRow = document.getElementById('markerEuclidRow') as HTMLElement | null;
 	const holdTile = document.getElementById('markerHoldTile') as HTMLElement | null;
+	const driftTile = document.getElementById('markerDriftTile') as HTMLElement | null;
+	const driftSpeedTile = document.getElementById('markerDriftSpeedTile') as HTMLElement | null;
 	const bpmKnob = document.querySelector('.knob[data-knob="marker-bpm"]') as HTMLElement | null;
 	const canvas = document.getElementById('markerTransportCanvas') as HTMLCanvasElement | null;
 	const metaEl = document.getElementById('markerTransportMeta');
@@ -186,7 +188,9 @@ export function createMarkerRack(config: {
 			: sortMarkers(lastParams?.markers ?? []).map(m => ({
 				id: m.id,
 				timeSec: m.timeSec,
-				hold: markerHold(m)
+				hold: markerHold(m),
+				liveSec: m.timeSec,
+				driftMs: markerDriftMs(m)
 			}));
 
 		if (source.length === 0) {
@@ -256,25 +260,42 @@ export function createMarkerRack(config: {
 			if (x == null) return;
 			const isPlaying = visual?.playingId === m.id;
 			const hold = m.hold;
+			const drifting = (m.driftMs ?? 0) > 0 && Math.abs((m.liveSec ?? m.timeSec) - m.timeSec) > 0.0005;
+			const liveX = drifting
+				? playheadX(m.liveSec, source, xs, width, pad)
+				: x;
 			const r = isPlaying ? 4.2 + hitPulse * 3 + bloom * 2.2 : (hold > 0 ? 3.2 : 2.6);
+			if (drifting) {
+				ctx.beginPath();
+				ctx.strokeStyle = hexToRgba(motion, 0.28);
+				ctx.lineWidth = 1;
+				ctx.moveTo(x, pathY);
+				ctx.lineTo(liveX, pathY);
+				ctx.stroke();
+				ctx.beginPath();
+				ctx.fillStyle = hexToRgba(motion, 0.28);
+				ctx.arc(x, pathY, 2, 0, Math.PI * 2);
+				ctx.fill();
+			}
+			const drawX = drifting ? liveX : x;
 			ctx.beginPath();
 			ctx.fillStyle = hexToRgba(motion, isPlaying ? 0.22 + bloom * 0.25 : 0.1);
-			ctx.arc(x, pathY, r + 4, 0, Math.PI * 2);
+			ctx.arc(drawX, pathY, r + 4, 0, Math.PI * 2);
 			ctx.fill();
 			ctx.beginPath();
 			ctx.fillStyle = isPlaying ? motion : hexToRgba(motion, running ? 0.7 : 0.45);
-			ctx.arc(x, pathY, r, 0, Math.PI * 2);
+			ctx.arc(drawX, pathY, r, 0, Math.PI * 2);
 			ctx.fill();
 			if (isPlaying) {
 				ctx.strokeStyle = hexToRgba(motion, 0.85);
 				ctx.lineWidth = 1.25;
 				ctx.beginPath();
-				ctx.arc(x, pathY, r + 3.5 + hitPulse * 4, 0, Math.PI * 2);
+				ctx.arc(drawX, pathY, r + 3.5 + hitPulse * 4, 0, Math.PI * 2);
 				ctx.stroke();
 			}
 			if (hold > 0) {
 				ctx.fillStyle = hexToRgba(motion, 0.7);
-				ctx.fillRect(x - 1, pathY + r + 3, 2, 2 + hold * 1.1);
+				ctx.fillRect(drawX - 1, pathY + r + 3, 2, 2 + hold * 1.1);
 			}
 		});
 
@@ -309,6 +330,7 @@ export function createMarkerRack(config: {
 		if (visual.running) parts.push('RUN');
 		if (visual.playingIndex >= 0) parts.push(`${visual.playingIndex + 1}/${count}`);
 		if (visual.holdLeft > 0) parts.push(`HOLD ${visual.holdLeft}`);
+		if (visual.markers.some(m => m.driftMs > 0)) parts.push('DRIFT');
 		if (visual.grainMode === 'bloom' && visual.bloom > 0.05) parts.push('BLOOM');
 		if (visual.grainMode === 'glide') parts.push('GLIDE');
 		metaEl.textContent = parts.join('  ·  ');
@@ -340,6 +362,8 @@ export function createMarkerRack(config: {
 
 	function setHoldEnabled(enabled: boolean) {
 		holdTile?.classList.toggle('is-disabled', !enabled);
+		driftTile?.classList.toggle('is-disabled', !enabled);
+		driftSpeedTile?.classList.toggle('is-disabled', !enabled);
 	}
 
 	function updateLive(visual: MarkerLaneVisual | null) {

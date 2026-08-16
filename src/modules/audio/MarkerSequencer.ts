@@ -1,7 +1,10 @@
 import {
 	burstPattern,
 	clavePattern,
+	driftedMarkerTime,
 	euclideanPattern,
+	isDiscreteGrainMode,
+	markerDriftMs,
 	markerHold,
 	markersInRegion,
 	rateToSeconds,
@@ -25,6 +28,7 @@ export type MarkerLaneInput = {
 	params: MarkerSeqParams;
 	region: { start: number; end: number } | null;
 	density: number;
+	duration: number;
 };
 
 type LaneState = {
@@ -37,6 +41,7 @@ type LaneState = {
 	params: MarkerSeqParams;
 	region: { start: number; end: number } | null;
 	density: number;
+	duration: number;
 	runningClock: boolean;
 	pending: { at: number; marker: Marker }[];
 	glideFrom: number;
@@ -61,7 +66,7 @@ export type MarkerLaneVisual = {
 	progress: number;
 	bloom: number;
 	grainMode: MarkerGrainMode;
-	markers: { id: string; timeSec: number; hold: number }[];
+	markers: { id: string; timeSec: number; hold: number; liveSec: number; driftMs: number }[];
 	playingId: string | null;
 	playingIndex: number;
 	fromIndex: number;
@@ -95,6 +100,29 @@ export function createMarkerSequencer(config: {
 
 	function inRegionMarkers(lane: LaneState): Marker[] {
 		return markersInRegion(lane.params.markers, lane.region);
+	}
+
+	function timeBounds(lane: LaneState): { lo: number; hi: number } {
+		const dur = Math.max(0, lane.duration);
+		let lo = 0;
+		let hi = dur > 0 ? dur : Number.POSITIVE_INFINITY;
+		if (lane.region) {
+			lo = Math.min(lane.region.start, lane.region.end);
+			hi = Math.max(lane.region.start, lane.region.end);
+		}
+		if (!Number.isFinite(hi) || hi <= lo) {
+			hi = lo + 0.001;
+		}
+		return { lo, hi };
+	}
+
+	function liveTime(lane: LaneState, marker: Marker, now: number): number {
+		const { lo, hi } = timeBounds(lane);
+		return driftedMarkerTime(marker, now, lo, hi);
+	}
+
+	function liveCopy(lane: LaneState, marker: Marker, now: number): Marker {
+		return { ...marker, timeSec: liveTime(lane, marker, now) };
 	}
 
 	function refillShuffle(count: number): number[] {
@@ -232,13 +260,15 @@ export function createMarkerSequencer(config: {
 
 	function fire(lane: LaneState, marker: Marker, extras: boolean) {
 		recordPlay(lane, marker);
+		const now = nowSec();
+		const live = liveCopy(lane, marker, now);
 		if (lane.params.grainMode === 'glide') {
 			const interval = rateToSeconds(lane.params.bpm, lane.params.rate);
-			lane.glideFrom = lane.lastMarkerTime ?? marker.timeSec;
-			lane.glideTo = marker.timeSec;
-			lane.glideStart = nowSec();
+			lane.glideFrom = lane.lastMarkerTime ?? live.timeSec;
+			lane.glideTo = live.timeSec;
+			lane.glideStart = now;
 			lane.glideDur = Math.max(0.05, interval);
-			lane.lastMarkerTime = marker.timeSec;
+			lane.lastMarkerTime = live.timeSec;
 			config.onActiveMarker(lane.padIndex, marker.id);
 			return;
 		}
@@ -251,12 +281,12 @@ export function createMarkerSequencer(config: {
 
 		config.onTick({
 			padIndex: lane.padIndex,
-			marker,
+			marker: live,
 			grainMode: lane.params.grainMode,
 			density: lane.density
 		});
 		config.onActiveMarker(lane.padIndex, marker.id);
-		lane.lastMarkerTime = marker.timeSec;
+		lane.lastMarkerTime = live.timeSec;
 
 		if (!extras) return;
 		const interval = rateToSeconds(lane.params.bpm, lane.params.rate);
@@ -347,6 +377,22 @@ export function createMarkerSequencer(config: {
 		config.onDensity?.(lane.padIndex, bloomDensity(lane, now));
 	}
 
+	function updateDrift(lane: LaneState, now: number) {
+		if (isDiscreteGrainMode(lane.params.grainMode)) return;
+		if (lane.params.grainMode === 'glide') return;
+		if (!lane.playingId) return;
+		const marker = inRegionMarkers(lane).find(m => m.id === lane.playingId);
+		if (!marker || markerDriftMs(marker) <= 0) return;
+		const timeSec = liveTime(lane, marker, now);
+		lane.lastMarkerTime = timeSec;
+		config.onTick({
+			padIndex: lane.padIndex,
+			marker: { id: 'drift', timeSec },
+			grainMode: lane.params.grainMode,
+			density: lane.density
+		});
+	}
+
 	function schedulerTick() {
 		let ctx: AudioContext;
 		try {
@@ -369,6 +415,7 @@ export function createMarkerSequencer(config: {
 
 			updateGlide(lane, now);
 			updateBloom(lane, now);
+			updateDrift(lane, now);
 
 			let guard = 0;
 			while (lane.nextTime < now + LOOKAHEAD && guard < 8) {
@@ -382,6 +429,7 @@ export function createMarkerSequencer(config: {
 
 			updateGlide(lane, now);
 			updateBloom(lane, now);
+			updateDrift(lane, now);
 		});
 	}
 
@@ -419,6 +467,7 @@ export function createMarkerSequencer(config: {
 			params: input.params,
 			region: input.region,
 			density: input.density,
+			duration: Math.max(0, input.duration),
 			runningClock: false,
 			pending: [],
 			glideFrom: 0,
@@ -458,6 +507,7 @@ export function createMarkerSequencer(config: {
 		lane.params = input.params;
 		lane.region = input.region;
 		lane.density = input.density;
+		lane.duration = Math.max(0, input.duration);
 		if (lane.params.grainMode !== 'bloom') {
 			clearBloom(lane);
 		}
@@ -522,7 +572,7 @@ export function createMarkerSequencer(config: {
 			playheadSec = lane.glideFrom + (lane.glideTo - lane.glideFrom) * ease;
 		} else if (lane.playingId) {
 			const marker = list.find(m => m.id === lane.playingId);
-			playheadSec = marker?.timeSec ?? lane.lastMarkerTime;
+			playheadSec = marker ? liveTime(lane, marker, now) : lane.lastMarkerTime;
 		} else {
 			playheadSec = lane.lastMarkerTime;
 		}
@@ -538,7 +588,13 @@ export function createMarkerSequencer(config: {
 			progress,
 			bloom,
 			grainMode: lane.params.grainMode,
-			markers: list.map(m => ({ id: m.id, timeSec: m.timeSec, hold: markerHold(m) })),
+			markers: list.map(m => ({
+				id: m.id,
+				timeSec: m.timeSec,
+				hold: markerHold(m),
+				liveSec: liveTime(lane, m, now),
+				driftMs: markerDriftMs(m)
+			})),
 			playingId: lane.playingId,
 			playingIndex: lane.playingIndex,
 			fromIndex: lane.fromIndex,

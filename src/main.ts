@@ -14,7 +14,7 @@ import { PARAMS, type ParamId } from './modules/ui/ParamRegistry';
 import { ParameterMapper } from './modules/utils/ParameterMapper';
 import { MidiManager, type MidiMapping, loadMappings, saveMappings } from './modules/midi/MidiManager';
 import { createPadParamStore, defaultEffects, defaultGranular } from './modules/editor/PadParamStore';
-import { defaultMarkerSeq, clearMarkers, isDiscreteGrainMode, shiftMarkersWithRegion, setMarkerHold, markerHold, type MarkerSeqParams } from './modules/editor/MarkerStore';
+import { defaultMarkerSeq, clearMarkers, isDiscreteGrainMode, shiftMarkersWithRegion, setMarkerHold, setMarkerDrift, markerHold, markerDriftMs, markerDriftHz, type MarkerSeqParams } from './modules/editor/MarkerStore';
 import { createMarkerSequencer } from './modules/audio/MarkerSequencer';
 import { createMarkerRack } from './modules/ui/MarkerRack';
 import { initSidebarNav } from './modules/ui/SidebarNav';
@@ -86,7 +86,7 @@ const markerSequencer = createMarkerSequencer({
 		state.voiceManager.setVoiceGrainAnchor(padIndex, marker.timeSec, true);
 		// Glide interpolations only move the cloud; marker arrivals (and Cloud/Pulse) spawn now
 		// so the step is on the beat. FX delay stays the rack delay — no extra sequencer latency.
-		if (grainMode === 'glide' && marker.id === 'glide') {
+		if ((grainMode === 'glide' && marker.id === 'glide') || marker.id === 'drift') {
 			state.voiceManager.setVoiceAutoSpawn(padIndex, true);
 			return;
 		}
@@ -107,6 +107,7 @@ const markerSequencer = createMarkerSequencer({
 		state.voiceManager?.resetVoiceGrainSource(padIndex);
 		if (padIndex === state.activePadIndex) {
 			waveform.setActiveMarkerId(null);
+			waveform.setPlaybackVisual(null, null);
 		}
 		updateSidebarStatus();
 	},
@@ -1622,7 +1623,7 @@ function refreshMarkerUI() {
 	const selectedId = waveform.getSelectedMarkerId();
 	markerRack?.setHoldEnabled(!!selectedId);
 	updateRandTooltip(seq.enabled);
-	(['marker-bpm', 'marker-chance', 'marker-euclid-hits', 'marker-euclid-steps', 'marker-hold'] as const).forEach((id) => {
+	(['marker-bpm', 'marker-chance', 'marker-euclid-hits', 'marker-euclid-steps', 'marker-hold', 'marker-drift', 'marker-drift-speed'] as const).forEach((id) => {
 		const cfg = knobConfigs.find(k => k.id === id);
 		if (!cfg) return;
 		const knobEl = document.querySelector(`.knob[data-knob="${id}"]`) as HTMLElement | null;
@@ -1652,7 +1653,8 @@ function syncMarkerEngine(index: number, liveRegion?: { start: number; end: numb
 		playing: state.voiceManager?.isPadPlaying(index) ?? false,
 		params: { ...seq, markers },
 		region,
-		density: params.granular.density
+		density: params.granular.density,
+		duration: state.buffer?.duration ?? 0
 	});
 	if (markerSequencer.isLaneRunning(index) && state.voiceManager) {
 		if (isDiscreteGrainMode(seq.grainMode)) {
@@ -1765,9 +1767,12 @@ function startVisualizationLoop() {
                 markerRack?.updateLive(visual);
             }
             if (state.activePadIndex != null) {
-                waveform.setPlayhead(visual?.playheadSec ?? null);
+                const live = visual
+                    ? new Map(visual.markers.filter(m => m.driftMs > 0).map(m => [m.id, m.liveSec]))
+                    : null;
+                waveform.setPlaybackVisual(visual?.playheadSec ?? null, live && live.size > 0 ? live : null);
             } else {
-                waveform.setPlayhead(null);
+                waveform.setPlaybackVisual(null, null);
             }
             
             lastUpdate = now;
@@ -2419,7 +2424,7 @@ setXYMode('params');
 
 // ---------- Param tiles (knobs) ----------
 type KnobConfig = {
-	id: 'pitch' | 'density' | 'grain' | 'rand' | 'selpos' | 'filter' | 'res' | 'dtime' | 'dmix' | 'reverb' | 'gain' | 'xyspeed' | 'xyshift' | 'motion-speed' | 'motion-loop' | 'zoom' | 'nudge-step' | 'recall' | 'midi-learn' | 'marker-bpm' | 'marker-chance' | 'marker-euclid-hits' | 'marker-euclid-steps' | 'marker-hold';
+	id: 'pitch' | 'density' | 'grain' | 'rand' | 'selpos' | 'filter' | 'res' | 'dtime' | 'dmix' | 'reverb' | 'gain' | 'xyspeed' | 'xyshift' | 'motion-speed' | 'motion-loop' | 'zoom' | 'nudge-step' | 'recall' | 'midi-learn' | 'marker-bpm' | 'marker-chance' | 'marker-euclid-hits' | 'marker-euclid-steps' | 'marker-hold' | 'marker-drift' | 'marker-drift-speed';
 	min: number; max: number; step: number;
 	get: () => number;
 	set: (v: number) => void;
@@ -2897,6 +2902,48 @@ const knobConfigs: KnobConfig[] = [
 		format: (v) => {
 			if (!waveform.getSelectedMarkerId()) return '—';
 			return String(Math.round(v));
+		}
+	},
+	{
+		id: 'marker-drift', min: 0, max: 400, step: 1,
+		get: () => {
+			const id = waveform.getSelectedMarkerId();
+			if (!id) return 0;
+			const marker = getMarkerSeq(state.activePadIndex ?? 0).markers.find(m => m.id === id);
+			return marker ? markerDriftMs(marker) : 0;
+		},
+		set: (v) => {
+			const id = waveform.getSelectedMarkerId();
+			if (!id || state.activePadIndex == null) return;
+			const seq = setMarkerDrift(getMarkerSeq(state.activePadIndex), id, { driftMs: v });
+			state.padParams.setMarkerSeq(state.activePadIndex, { markers: seq.markers });
+			waveform.setMarkers(seq.markers);
+			syncMarkerEngine(state.activePadIndex);
+		},
+		format: (v) => {
+			if (!waveform.getSelectedMarkerId()) return '—';
+			return `${Math.round(v)} ms`;
+		}
+	},
+	{
+		id: 'marker-drift-speed', min: 0.03, max: 0.4, step: 0.01,
+		get: () => {
+			const id = waveform.getSelectedMarkerId();
+			if (!id) return 0.08;
+			const marker = getMarkerSeq(state.activePadIndex ?? 0).markers.find(m => m.id === id);
+			return marker ? markerDriftHz(marker) : 0.08;
+		},
+		set: (v) => {
+			const id = waveform.getSelectedMarkerId();
+			if (!id || state.activePadIndex == null) return;
+			const seq = setMarkerDrift(getMarkerSeq(state.activePadIndex), id, { driftHz: v });
+			state.padParams.setMarkerSeq(state.activePadIndex, { markers: seq.markers });
+			syncMarkerEngine(state.activePadIndex);
+		},
+		format: (v) => {
+			if (!waveform.getSelectedMarkerId()) return '—';
+			const hz = Math.max(0.03, v);
+			return `${(1 / hz).toFixed(1)}s`;
 		}
 	}
 ];
