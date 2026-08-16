@@ -4,6 +4,7 @@ import type { Region } from '../editor/RegionStore';
 import type { MotionPoint, PadParams } from '../editor/PadParamStore';
 import { PARAMS, type ParamId } from '../ui/ParamRegistry';
 import { ParameterMapper } from '../utils/ParameterMapper';
+import { quantizePitch } from '../utils/ScaleQuantizer';
 
 export type Voice = {
 	id: number;
@@ -33,6 +34,8 @@ export type Voice = {
     
     // Store region for selectionPos calculation
     region: Region | null;
+	/** Live density overlay from marker bloom; null = use mapped/base density */
+	densityOverride: number | null;
     
     // Store indices for real-time lookup (Pads Mode)
     padMorphIndices?: {
@@ -51,6 +54,8 @@ export class VoiceManager {
 	private nextVoiceId = 0;
 	private animationFrame: number | null = null;
     private paramProvider: ((index: number) => PadParams | null) | null = null;
+    /** Index into SCALES array — 0 = Chromatic (no quantization) */
+    private activeScaleIndex: number = 0;
 
 	constructor(context: AudioContext, maxVoices: number = 4) {
 		this.context = context;
@@ -81,7 +86,8 @@ export class VoiceManager {
                 lastSentFx: null,
                 lastSelectionPos: null,
 				cornerMapping: null,
-                region: null
+                region: null,
+				densityOverride: null
 			});
 		}
         // Start the internal automation loop
@@ -98,10 +104,13 @@ export class VoiceManager {
             const now = performance.now();
             const shouldUpdateAudio = (now - lastAudioUpdate) >= AUDIO_UPDATE_INTERVAL;
             
-            this.updateVoices(shouldUpdateAudio);
-            
-            if (shouldUpdateAudio) {
-                lastAudioUpdate = now;
+            // Fast check: if no active voices, skip update computation
+            const hasActiveVoice = this.voices.some(v => v.active);
+            if (hasActiveVoice) {
+                this.updateVoices(shouldUpdateAudio);
+                if (shouldUpdateAudio) {
+                    lastAudioUpdate = now;
+                }
             }
             
             this.animationFrame = requestAnimationFrame(loop);
@@ -193,18 +202,73 @@ export class VoiceManager {
         };
     }
 
+    /**
+     * Set the active musical scale for pitch quantization.
+     * Index 0 = Chromatic (no quantization).
+     */
+    setActiveScale(scaleIndex: number): void {
+        this.activeScaleIndex = scaleIndex;
+        // Immediately update active voices so pitch snaps to new scale
+        this.voices.forEach(v => {
+            if (v.active) {
+                this.applyXYToParams(v);
+            }
+        });
+    }
+
+    /**
+     * Update base parameters for an active voice (e.g. when user turns a knob).
+     * Unmapped knobs live in baseParams and must still reach the engine even when
+     * every XY corner is 'none'.
+     */
+    updateVoiceBaseParams(padIndex: number, granular?: Partial<GranularParams>, fx?: Partial<EffectsParams>): void {
+        const voice = this.getActiveVoiceForPad(padIndex);
+        if (voice && voice.baseParams) {
+            if (granular) {
+                voice.baseParams.granular = { ...voice.baseParams.granular, ...granular };
+            }
+            if (fx) {
+                voice.baseParams.effects = { ...voice.baseParams.effects, ...fx };
+            }
+            this.applyXYToParams(voice);
+        }
+    }
+
+    /** Re-push base + XY mapping after corner assignments change. */
+    refreshVoiceParams(padIndex: number): void {
+        const voice = this.getActiveVoiceForPad(padIndex);
+        if (voice) this.applyXYToParams(voice);
+    }
+
     private applyXYToParams(voice: Voice) {
-        if (!voice.baseParams || !voice.cornerMapping) return;
+        if (!voice.baseParams) return;
 
-        // 1. Calculate Weights
-        const weights = ParameterMapper.calculateWeights(voice.currentX, voice.currentY);
+        let granularUpdate: Partial<GranularParams> = {};
+        let fxUpdate: Partial<EffectsParams> = {};
+        let selectionPosUpdate: number | undefined;
 
-        // 2. Map Parameters using shared logic
-        const { granular: granularUpdate, effects: fxUpdate, selectionPos: selectionPosUpdate } = ParameterMapper.mapParams(
-            weights,
-            voice.baseParams,
-            voice.cornerMapping
-        );
+        if (voice.cornerMapping) {
+            const weights = ParameterMapper.calculateWeights(voice.currentX, voice.currentY);
+            const mapped = ParameterMapper.mapParams(
+                weights,
+                voice.baseParams,
+                voice.cornerMapping
+            );
+            granularUpdate = mapped.granular;
+            fxUpdate = mapped.effects;
+            selectionPosUpdate = mapped.selectionPos;
+        }
+
+        // Knobs not assigned to a corner stay at baseParams; XY only overlays mapped ids.
+        const granular = { ...voice.baseParams.granular, ...granularUpdate };
+        const fx = { ...voice.baseParams.effects, ...fxUpdate };
+		if (voice.densityOverride != null) {
+			granular.density = voice.densityOverride;
+		}
+
+        if (granular.pitchSemitones !== undefined && this.activeScaleIndex !== 0) {
+            granular.pitchSemitones = quantizePitch(granular.pitchSemitones, this.activeScaleIndex);
+        }
 
         // Apply to Engine with Dirty Checking
         // Increased EPSILON to reduce update frequency and CPU load
@@ -221,17 +285,13 @@ export class VoiceManager {
             return false;
         };
 
-        if (Object.keys(granularUpdate).length > 0) {
-            if (hasChanged(granularUpdate, voice.lastSentGranular)) {
-                voice.engine.setParams(granularUpdate);
-                voice.lastSentGranular = { ...voice.lastSentGranular, ...granularUpdate };
-            }
+        if (hasChanged(granular, voice.lastSentGranular)) {
+            voice.engine.setParams(granular);
+            voice.lastSentGranular = { ...granular };
         }
-        if (Object.keys(fxUpdate).length > 0) {
-            if (hasChanged(fxUpdate, voice.lastSentFx)) {
-                voice.engine.setEffectParams(fxUpdate);
-                voice.lastSentFx = { ...voice.lastSentFx, ...fxUpdate };
-            }
+        if (hasChanged(fx, voice.lastSentFx)) {
+            voice.engine.setEffectParams(fx);
+            voice.lastSentFx = { ...fx };
         }
         
         // Apply selectionPos to region if calculated and changed
@@ -324,15 +384,50 @@ export class VoiceManager {
         voice.lastSentGranular = null;
         voice.lastSentFx = null;
         voice.lastSelectionPos = null;
+		voice.densityOverride = null;
 
 		// Set initial params
         voice.engine.setParams(granular);
         voice.engine.setEffectParams(effects);
-        voice.engine.setRegion(region.start, region.end);
+		voice.engine.setRegion(region.start, region.end);
+		voice.engine.setGrainAnchor(0, false);
+		voice.engine.setAutoSpawn(true);
         
 		voice.engine.trigger();
 
 		return voice;
+	}
+
+	setVoiceGrainAnchor(padIndex: number, timeSec: number, enabled: boolean) {
+		const voice = this.getActiveVoiceForPad(padIndex);
+		if (!voice || !this.buffer) return;
+		const sample = Math.max(0, timeSec) * this.buffer.sampleRate;
+		voice.engine.setGrainAnchor(sample, enabled);
+	}
+
+	setVoiceAutoSpawn(padIndex: number, enabled: boolean) {
+		const voice = this.getActiveVoiceForPad(padIndex);
+		if (!voice) return;
+		voice.engine.setAutoSpawn(enabled);
+	}
+
+	spawnVoiceGrain(padIndex: number, count: number = 1) {
+		const voice = this.getActiveVoiceForPad(padIndex);
+		if (!voice) return;
+		voice.engine.spawnNow(count);
+	}
+
+	resetVoiceGrainSource(padIndex: number) {
+		this.setVoiceGrainAnchor(padIndex, 0, false);
+		this.setVoiceAutoSpawn(padIndex, true);
+		this.setVoiceDensity(padIndex, null);
+	}
+
+	setVoiceDensity(padIndex: number, density: number | null) {
+		const voice = this.getActiveVoiceForPad(padIndex);
+		if (!voice) return;
+		voice.densityOverride = density == null ? null : Math.max(1, Math.min(60, density));
+		this.applyXYToParams(voice);
 	}
 
     // Allow UI to override automation (e.g., dragging XY pad)
@@ -376,6 +471,9 @@ export class VoiceManager {
 
 	stopAll() {
 		this.voices.forEach(v => {
+			v.engine.setGrainAnchor(0, false);
+			v.engine.setAutoSpawn(true);
+			v.densityOverride = null;
 			v.engine.stop();
 			v.active = false;
 		});
@@ -411,6 +509,9 @@ export class VoiceManager {
     stopPad(padIndex: number) {
         this.voices.forEach(v => {
             if (v.active && v.padIndex === padIndex) {
+                v.engine.setGrainAnchor(0, false);
+                v.engine.setAutoSpawn(true);
+				v.densityOverride = null;
                 v.engine.stop();
                 v.active = false;
             }

@@ -4,366 +4,620 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!-- CSP: More permissive in dev mode for Vite HMR and worklets -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:* ws://localhost:*; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:*; style-src 'self' 'unsafe-inline'; img-src 'self' data: file:; connect-src 'self' http://localhost:* ws://localhost:*; worker-src 'self' blob:; media-src 'self' blob: file:; child-src 'self' blob:;" />
-    <title>Granular Music Tool</title>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:* ws://localhost:*; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:*; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: file:; connect-src 'self' http://localhost:* ws://localhost:*; worker-src 'self' blob:; media-src 'self' blob: file:; child-src 'self' blob:; font-src 'self' data: https://fonts.gstatic.com;" />
+    <title>Undergrain — Topographic Granulator</title>
+    <!-- Typography: Space Grotesk (UI) + DM Mono (values) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="./src/styles.css" />
   </head>
   <body>
     <div id="app">
       <div class="window-drag-bar"></div>
       <div class="app-layout">
-        <!-- XY Pad - Left side -->
+        <!-- Left side: Source Waveform Studio & 3D Topographic Space -->
         <main class="xy-pad-container">
-          <!-- Floating Header -->
-          <div class="xy-floating-header">
-            <div class="app-header-section">
-              <img id="appLogo" src="./images/logo.png" alt="Logo" class="logo-icon" />
+          <!-- Sleek Top Bar -->
+          <div class="xy-top-bar">
+            <!-- Left: Brand Logo & Title -->
+            <div class="xy-brand">
+              <canvas id="appLogo" class="logo-icon" width="56" height="56" aria-label="Undergrain 3D Wireframe Logo"></canvas>
               <div class="app-header-text">
-                <h2 class="app-logo">
+                <div class="app-logo-row">
                   <span class="logo-text">Undergrain</span>
                   <span class="beta-badge">BETA</span>
-                </h2>
-                <p class="app-subtitle">topographic granulator</p>
-                <p class="app-version">v0.1.0</p>
-              </div>
-            </div>
-            <div class="xy-controls-top">
-              <button
-                id="helpButton"
-                class="help-button"
-                type="button"
-                title="Quick start / Help"
-                aria-label="Open quick start help"
-              >
-                ?
-              </button>
-              <div class="control-group">
-                <label style="grid-template-columns:auto auto auto 1fr;gap:8px;align-items:center;">
-                  <span>Mode</span>
-                  <button id="xyModeParams" class="xy-mode-btn active" data-mode="params" title="Single parameters" aria-label="Single parameters">
-                    <span class="xy-mode-icon">▬</span>
-                  </button>
-                  <button id="xyModePads" class="xy-mode-btn" data-mode="pads" title="Pad" aria-label="Pad">
-                    <span class="xy-mode-icon">▦</span>
-                  </button>
-                </label>
-              </div>
-              <span class="xy-hint">
-                <span class="hint-text">Arrow keys</span>
-                <span class="hint-arrows">
-                  <span class="arrow-key">←</span>
-                  <span class="arrow-key">↑</span>
-                  <span class="arrow-key">→</span>
-                  <span class="arrow-key">↓</span>
-                </span>
-                <span class="hint-text">to move</span>
-              </span>
-            </div>
-          </div>
-          <div class="xy-pad-wrapper">
-            <div class="xy-header">
-              <div class="xy-assign">
-                <div class="xy-pad-canvas-container">
-                  <canvas id="xyPad" width="800" height="800"></canvas>
-                  <div id="xyCornerTL" class="xy-corner-selector xy-corner-tl" aria-label="Top left corner"></div>
-                  <div id="xyCornerTR" class="xy-corner-selector xy-corner-tr" aria-label="Top right corner"></div>
-                  <div id="xyCornerBL" class="xy-corner-selector xy-corner-bl" aria-label="Bottom left corner"></div>
-                  <div id="xyCornerBR" class="xy-corner-selector xy-corner-br" aria-label="Bottom right corner"></div>
                 </div>
+                <span class="app-subtitle">topographic granulator <span class="app-version">v0.1.0</span></span>
               </div>
             </div>
-          </div>
-        </main>
 
-        <!-- Sidebar - Right side with dense grid, no empty spaces -->
-        <aside class="app-sidebar">
-          <!-- Waveform - spans full width -->
-          <div class="grid-item grid-item-waveform">
-            <div class="waveform-wrap">
-              <canvas id="waveform" width="1200" height="160"></canvas>
-              <div class="waveform-meta">
-                <span>Selection: <span id="selStart">0.00</span>s – <span id="selEnd">0.00</span>s</span>
-                <span id="bufferDur" style="opacity:.8"></span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Granular Parameters -->
-          <div class="grid-item grid-item-params">
-            <div class="param-grid">
-              <div class="param-tile" data-tile="pitch">
-                <div class="tile-header">PITCH</div>
-                <div class="knob" data-knob="pitch" data-tooltip="Pitch shift in semitones (-12 to +12)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
-                <div class="tile-value" data-val="pitch">0</div>
-              </div>
-              <div class="param-tile" data-tile="density">
-                <div class="tile-header">DENSITY</div>
-                <div class="knob" data-knob="density" data-tooltip="Grain density - number of grains per second (1-60)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
-                <div class="tile-value" data-val="density">15</div>
-              </div>
-              <div class="param-tile" data-tile="grain">
-                <div class="tile-header">GRAIN</div>
-                <div class="knob" data-knob="grain" data-tooltip="Grain size in milliseconds (10-200ms)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
-                <div class="tile-value" data-val="grain">80</div>
-              </div>
-              <div class="param-tile" data-tile="rand">
-                <div class="tile-header">RAND</div>
-                <div class="knob" data-knob="rand" data-tooltip="Random start offset in milliseconds (0-200ms)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
-                <div class="tile-value" data-val="rand">40</div>
-              </div>
-              <div class="param-tile" data-tile="selpos">
-                <div class="tile-header">POS</div>
-                <div class="knob" data-knob="selpos" data-tooltip="Selection position in buffer (0-100%)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
-                <div class="tile-value" data-val="selpos">0</div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Effects Parameters -->
-          <div class="grid-item grid-item-effects">
-            <div class="param-grid">
-              <div class="param-tile" data-tile="filter">
-                <div class="tile-header">FILTER</div>
-                <div class="knob" data-knob="filter" data-tooltip="Filter cutoff frequency in Hz (200-12000Hz)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
-                <div class="tile-value" data-val="filter">4000</div>
-              </div>
-              <div class="param-tile" data-tile="res">
-                <div class="tile-header">RES</div>
-                <div class="knob" data-knob="res" data-tooltip="Filter resonance/Q factor (0-20)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
-                <div class="tile-value" data-val="res">0</div>
-              </div>
-              <div class="param-tile" data-tile="dtime">
-                <div class="tile-header">DLY-T</div>
-                <div class="knob" data-knob="dtime" data-tooltip="Delay time in seconds (0-1.2s)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
-                <div class="tile-value" data-val="dtime">0.25</div>
-              </div>
-              <div class="param-tile" data-tile="dmix">
-                <div class="tile-header">DLY-M</div>
-                <div class="knob" data-knob="dmix" data-tooltip="Delay mix amount (0-1)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
-                <div class="tile-value" data-val="dmix">0.15</div>
-              </div>
-              <div class="param-tile" data-tile="reverb">
-                <div class="tile-header">REVERB</div>
-                <div class="knob" data-knob="reverb" data-tooltip="Reverb mix amount (0-1)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
-                <div class="tile-value" data-val="reverb">0.2</div>
-              </div>
-              <div class="param-tile" data-tile="gain">
-                <div class="tile-header">GAIN</div>
-                <div class="knob" data-knob="gain" data-tooltip="Master gain/output volume (0-1.5)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
-                <div class="tile-value" data-val="gain">0.9</div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Pad Grid -->
-          <div class="grid-item grid-item-pads">
-            <div id="padGrid" class="pad-grid"></div>
-          </div>
-
-          <!-- Motion Canvas -->
-          <div class="grid-item grid-item-motion">
-            <div class="motion-canvas-wrap">
-              <canvas id="motionCanvas" width="300" height="300"></canvas>
-              <div id="motionCursor"></div>
-            </div>
-          </div>
-
-          <!-- XY Pad Speed -->
-          <div class="grid-item grid-item-xyspeed">
-            <div class="param-grid">
-              <div class="param-tile" data-tile="xyspeed">
-                <div class="tile-header">RATE</div>
-                <div class="knob" data-knob="xyspeed" data-tooltip="XY pad cursor movement rate (0.01-2.0)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
-                <div class="tile-value" data-val="xyspeed">0.15</div>
-              </div>
-              <div class="param-tile" data-tile="xyshift">
-                <div class="tile-header">SHIFT</div>
-                <div class="knob" data-knob="xyshift" data-tooltip="XY pad cursor shift amount (0.01-1.0)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
-                <div class="tile-value" data-val="xyshift">0.05</div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Motion Controls -->
-          <div class="grid-item grid-item-motion-controls">
-            <div class="param-grid">
-              <div class="param-tile" data-tile="motion-play">
-                <div class="tile-header">PLAY</div>
-                <button id="motionPlayBtn" class="knob" title="Play/Pause" style="cursor: pointer;">
-                  <div class="knob-fill" style="height: 0%;"></div>
-                  <span class="knob-icon knob-icon-play" aria-hidden="true"></span>
-                  <span class="knob-icon knob-icon-stop" aria-hidden="true"></span>
-                </button>
-                <div class="tile-value">0</div>
-              </div>
-              <div class="param-tile" data-tile="motion-clear">
-                <div class="tile-header">CLEAR</div>
-                <button id="motionClearBtn" class="knob" title="Clear Path" style="cursor: pointer;"><div class="knob-fill" style="height: 0%;"></div><span class="knob-plus">+</span></button>
-                <div class="tile-value">0</div>
-              </div>
-              <div class="param-tile" data-tile="motion-loop">
-                <div class="tile-header">LOOP</div>
-                <div class="option-selector" data-selector="motion-loop" data-tooltip="Motion path loop mode: Loop, PingPong, OneShot, Reverse">
-                  <button class="option-selector-btn" data-direction="prev" aria-label="Previous option">‹</button>
-                  <span class="option-selector-label" data-label="motion-loop">Loop</span>
-                  <button class="option-selector-btn" data-direction="next" aria-label="Next option">›</button>
-                </div>
-                <div class="tile-value" data-val="motion-loop" style="display: none;">Loop</div>
-              </div>
-              <div class="param-tile" data-tile="motion-speed">
-                <div class="tile-header">SPEED</div>
-                <div class="knob" data-knob="motion-speed" data-tooltip="Motion path playback speed (0.1-4.0x)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
-                <div class="tile-value" data-val="motion-speed">1.0</div>
-              </div>
-            </div>
-            <!-- Hidden inputs for JavaScript logic -->
-            <select id="motionLoopMode" style="display: none;">
-              <option value="loop">Loop</option>
-              <option value="pingpong">Ping Pong</option>
-              <option value="oneshot">One Shot</option>
-              <option value="reverse">Reverse</option>
-            </select>
-            <input id="motionSpeed" type="range" min="0.1" max="4" step="0.1" value="1" style="display: none;" />
-          </div>
-
-          <!-- MIDI Learn Controls -->
-          <div class="grid-item grid-item-midi">
-            <div class="param-grid">
-              <div class="param-tile" data-tile="midi-learn">
-                <div class="tile-header">MIDI</div>
-                <div class="knob toggle-switch-knob" data-knob="midi-learn" data-tooltip="Enable MIDI learn mode - click a control then send MIDI to assign"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
-                <div class="tile-value" data-val="midi-learn">OFF</div>
-              </div>
-              <div class="param-tile" data-tile="midi-clear">
-                <div class="tile-header">CLEAR</div>
-                <button id="midiClear" class="knob" title="Remove all MIDI assignments" style="cursor: pointer;"><div class="knob-fill" style="height: 0%;"></div><span class="knob-plus">+</span></button>
-                <div class="tile-value">0</div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Nudge Controls -->
-          <div class="grid-item grid-item-nudge">
-            <div class="param-grid">
-              <div class="param-tile" data-tile="nudge-left">
-                <div class="tile-header">◀</div>
-                <button id="nudgeLeft" class="knob" title="Move left" style="cursor: pointer;"><div class="knob-fill" style="height: 0%;"></div><span class="knob-plus">+</span></button>
-                <div class="tile-value">0</div>
-              </div>
-              <div class="param-tile" data-tile="nudge-right">
-                <div class="tile-header">▶</div>
-                <button id="nudgeRight" class="knob" title="Move right" style="cursor: pointer;"><div class="knob-fill" style="height: 0%;"></div><span class="knob-plus">+</span></button>
-                <div class="tile-value">0</div>
-              </div>
-              <div class="param-tile" data-tile="nudge-step">
-                <div class="tile-header">STEP</div>
-                <div class="knob" data-knob="nudge-step" data-tooltip="Nudge step size in milliseconds (1-1000ms)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
-                <div class="tile-value" data-val="nudge-step">20</div>
-              </div>
-            </div>
-            <!-- Hidden input for JavaScript logic -->
-            <input id="nudgeStepMs" type="number" min="1" max="1000" value="20" style="display: none;" />
-          </div>
-
-          <!-- Zoom Control -->
-          <div class="grid-item grid-item-zoom">
-            <div class="zoom-control">
-              <div class="zoom-header">ZOOM</div>
-              <div class="zoom-value-display" id="zoomValue">1.0x</div>
-              <div class="zoom-slider-container">
-                <input id="waveZoom" type="range" min="0.1" max="5" step="0.1" value="1" class="zoom-slider" />
-              </div>
-            </div>
-          </div>
-
-          <!-- Recall Per Pad Toggle -->
-          <div class="grid-item grid-item-recall">
-            <div class="param-grid">
-              <div class="param-tile" data-tile="recall">
-                <div class="tile-header">RECALL</div>
-                <div class="knob toggle-switch-knob active" data-knob="recall" data-tooltip="Recall parameters per pad - ON: smooth transition, OFF: instant"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
-                <div class="tile-value" data-val="recall">ON</div>
-              </div>
-            </div>
-          </div>
-
-          <!-- File Controls -->
-          <div class="grid-item grid-item-file">
-            <div class="param-grid">
+            <!-- Center: Audio File Dock Pill -->
+            <div class="header-file-pill grid-item-file">
               <div class="param-tile param-tile-file-load" data-tile="file-load">
-                <div class="tile-header">FILE</div>
-                <label for="fileInput" class="knob knob-file-main" data-tooltip="Load audio file (WAV, MP3, etc.) - START HERE" style="cursor: pointer; display: flex; align-items: center; justify-content: center;">
-                  <div class="knob-fill" style="height: 0%; display: none;"></div>
-                  <span class="knob-plus">⬆</span>
+                <label for="fileInput" class="header-btn file-load-btn" data-tooltip="Load audio file (WAV, MP3, etc.)">
+                  <span class="action-icon">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                      <line x1="12" y1="11" x2="12" y2="17"></line>
+                      <polyline points="9 14 12 11 15 14"></polyline>
+                    </svg>
+                  </span>
+                  <span class="btn-text">LOAD AUDIO</span>
                   <div class="file-loading-spinner" style="display: none;"></div>
                 </label>
                 <input id="fileInput" type="file" accept="audio/*" class="visually-hidden" />
-                <div class="tile-value">0</div>
               </div>
+
+              <div id="fileName" class="filename-badge" aria-live="polite">No File Loaded</div>
+
               <div class="param-tile param-tile-clear" data-tile="clear-selection">
-                <div class="tile-header">CLEAR</div>
-                <button id="clearSelectionBtn" class="knob knob-clear-main" title="Clear selection" style="cursor: pointer;"><div class="knob-fill" style="height: 0%;"></div><span class="knob-plus">✕</span></button>
-                <div class="tile-value">0</div>
+                <button id="clearSelectionBtn" class="header-btn header-btn-icon" title="Clear selection" aria-label="Clear selection">
+                  <span class="action-icon">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="6" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle>
+                      <line x1="20" y1="4" x2="8.12" y2="15.88"></line><line x1="14.47" y1="14.48" x2="20" y2="20"></line>
+                      <line x1="8.12" y1="8.12" x2="12" y2="12"></line>
+                    </svg>
+                  </span>
+                </button>
               </div>
             </div>
-            <div id="fileName" class="filename" style="font-size: 8px; text-align: center; margin-top: 2px; color: var(--muted);" aria-live="polite"></div>
+
+            <!-- Header Center-Right: Parametric Value Display Box -->
+            <div id="valueDisplayBox" class="header-value-display grid-item-value-display">
+              <span class="value-display-label">READY</span>
+              <span class="value-display-separator">:</span>
+              <span class="value-display-value">—</span>
+            </div>
+
+            <!-- Right: Controls & Utility Actions -->
+            <div class="xy-top-controls">
+              <div class="segmented-control" role="radiogroup" aria-label="XY Morph Mode">
+                <button id="xyModeParams" class="xy-mode-btn active" data-mode="params" title="Morph 4 parameter corners" aria-label="Parameters Morphing">
+                  <span class="xy-mode-icon">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line>
+                      <line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line>
+                      <line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line>
+                      <line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line>
+                    </svg>
+                  </span>
+                  <span class="xy-mode-label">PARAMS</span>
+                </button>
+                <button id="xyModePads" class="xy-mode-btn" data-mode="pads" title="Morph between 4 pads" aria-label="Pads Morphing">
+                  <span class="xy-mode-icon">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <rect x="3" y="3" width="7" height="7" rx="1.5"></rect>
+                      <rect x="14" y="3" width="7" height="7" rx="1.5"></rect>
+                      <rect x="14" y="14" width="7" height="7" rx="1.5"></rect>
+                      <rect x="3" y="14" width="7" height="7" rx="1.5"></rect>
+                    </svg>
+                  </span>
+                  <span class="xy-mode-label">PADS</span>
+                </button>
+              </div>
+
+              <!-- Theme Switcher & Help Button -->
+              <div class="header-action-btns">
+                <button id="themeToggle" class="header-btn header-btn-icon header-theme-toggle" title="Toggle theme (dark/light)">
+                  <span id="themeIcon" class="action-icon"></span>
+                </button>
+
+                <button
+                  id="helpButton"
+                  class="header-btn header-btn-icon help-button"
+                  type="button"
+                  title="Quick start / Help"
+                  aria-label="Open quick start help"
+                >
+                  ?
+                </button>
+              </div>
+            </div>
           </div>
 
-          <!-- Empty State Overlay -->
+          <!-- Waveform Studio Panel - Streamlined Single-Row Controls -->
+          <div class="waveform-studio-panel">
+            <div class="waveform-wrap grid-item grid-item-waveform">
+              <canvas id="waveform" width="1200" height="150"></canvas>
+              <div class="waveform-meta">
+                <span>Selection: <span id="selStart">0.00</span>s – <span id="selEnd">0.00</span>s</span>
+                <span id="bufferDur" style="opacity:.8"></span>
+                <span id="markerHint" class="waveform-hint">Shift+click to drop a marker · Alt+click to delete</span>
+              </div>
+            </div>
+
+            <!-- Single Unified Toolbar Row: Zoom/Nudge + Granular Controls -->
+            <div class="vst-dock-row vst-unified-dock grid-item-params">
+              <div class="vst-dock-group group-nav">
+                <!-- Nudge Tools -->
+                <div class="nudge-inline grid-item-nudge">
+                  <div class="param-tile" data-tile="nudge-left">
+                    <button id="nudgeLeft" class="knob-mini-btn" title="Move left">◀</button>
+                  </div>
+                  <div class="param-tile" data-tile="nudge-right">
+                    <button id="nudgeRight" class="knob-mini-btn" title="Move right">▶</button>
+                  </div>
+                  <div class="param-tile nudge-step-tile" data-tile="nudge-step">
+                    <span class="nudge-label">STEP</span>
+                    <div class="knob" data-knob="nudge-step" data-tooltip="Nudge step size (1-1000ms)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                    <div class="tile-value" data-val="nudge-step">20</div>
+                  </div>
+                  <input id="nudgeStepMs" type="number" min="1" max="1000" value="20" style="display: none;" />
+                </div>
+
+                <div class="dock-divider"></div>
+
+                <!-- Zoom Slider -->
+                <div class="zoom-inline grid-item-zoom">
+                  <span class="zoom-label">ZOOM</span>
+                  <input id="waveZoom" type="range" min="0.1" max="5" step="0.1" value="1" class="zoom-slider-mini" />
+                  <span class="zoom-value-display" id="zoomValue">1.0x</span>
+                </div>
+              </div>
+
+              <div class="dock-divider"></div>
+
+              <!-- Granular Engine Controls (Single Row Grid) -->
+              <div class="param-grid-5col">
+                <div class="param-tile pitch-tile-wide" data-tile="pitch">
+                  <div class="tile-header">PITCH</div>
+                  <div class="knob" data-knob="pitch" data-tooltip="Pitch shift in semitones (-12 to +12)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                  <div class="tile-value" data-val="pitch">0</div>
+                  <div class="scale-selector-wrap" data-tooltip="Select musical scale for pitch quantization">
+                    <button class="scale-nav-btn" id="scalePrev" aria-label="Previous scale">‹</button>
+                    <span class="scale-name" id="scaleNameDisplay">CHROM</span>
+                    <button class="scale-nav-btn" id="scaleNext" aria-label="Next scale">›</button>
+                  </div>
+                </div>
+                <div class="param-tile" data-tile="density">
+                  <div class="tile-header">DENSITY</div>
+                  <div class="knob" data-knob="density" data-tooltip="Grain density - number of grains per second (1-60)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                  <div class="tile-value" data-val="density">15</div>
+                </div>
+                <div class="param-tile" data-tile="grain">
+                  <div class="tile-header">GRAIN</div>
+                  <div class="knob" data-knob="grain" data-tooltip="Grain size in milliseconds (10-200ms)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                  <div class="tile-value" data-val="grain">80</div>
+                </div>
+                <div class="param-tile" data-tile="rand">
+                  <div class="tile-header">RAND</div>
+                  <div class="knob" data-knob="rand" data-tooltip="Random start offset in milliseconds (0-200ms)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                  <div class="tile-value" data-val="rand">40</div>
+                </div>
+                <div class="param-tile" data-tile="selpos">
+                  <div class="tile-header">POS</div>
+                  <div class="knob" data-knob="selpos" data-tooltip="Selection position in buffer (0-100%)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                  <div class="tile-value" data-val="selpos">0</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Empty State Overlay for Waveform Studio -->
           <div id="emptyStateOverlay" class="empty-state-overlay" aria-live="polite">
             <div class="empty-state-card">
               <div class="empty-state-step">1</div>
               <div class="empty-state-body">
                 <h3>To get started</h3>
-                <p>Load an audio file from the <strong>FILE</strong> box above.</p>
+                <p>Load an audio file from the <strong>FILE</strong> box in the Waveform Studio above.</p>
                 <p class="empty-state-sub">
-                  After loading, you can select a region in the waveform, assign it to a pad,
+                  After loading, drag to select a region in the waveform, assign it to a pad,
                   and explore the topographic space with the large XY pad.
                 </p>
                 <p class="empty-state-hint">
-                  Need help? Click the <strong>?</strong> button in the top left to open the Quick&nbsp;Start.
+                  Need help? Click the <strong>?</strong> button in the top bar to open Quick&nbsp;Start.
                 </p>
               </div>
             </div>
           </div>
 
-          <!-- Recording Controls -->
-          <div class="grid-item grid-item-recording">
-            <div class="param-grid">
-              <div class="param-tile" data-tile="record-audio">
-                <div class="tile-header">REC-A</div>
-                <button id="recordBtn" class="knob" title="Start audio recording" style="cursor: pointer;"><div class="knob-fill" style="height: 0%;"></div><span class="knob-plus">+</span></button>
-                <div class="tile-value">0</div>
+          <!-- 3D XY Pad Wrapper -->
+          <div class="xy-pad-wrapper">
+            <!-- 3D Vertex Mapping Legend Panel (Horizontal DAW Toolstrip HUD) -->
+            <div class="xy-legend-panel" aria-label="3D Vertex Corner Mapping Legend">
+              <div class="legend-header">
+                <span class="legend-title">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                    <polyline points="2 17 12 22 22 17"></polyline>
+                    <polyline points="2 12 12 17 22 12"></polyline>
+                  </svg>
+                  VERTICES
+                </span>
               </div>
-              <div class="param-tile" data-tile="record-video">
-                <div class="tile-header">REC-V</div>
-                <button id="recordVideoBtn" class="knob" title="Start video + audio recording" style="cursor: pointer;"><div class="knob-fill" style="height: 0%;"></div><span class="knob-plus">+</span></button>
-                <div class="tile-value">0</div>
-              </div>
-              <div class="param-tile" data-tile="stop">
-                <div class="tile-header">STOP</div>
-                <button id="stopRecordBtn" class="knob" disabled title="Stop recording" style="cursor: pointer;"><div class="knob-fill" style="height: 0%;"></div><span class="knob-plus">+</span></button>
-                <div class="tile-value">0</div>
+              <div class="legend-items">
+                <div class="legend-item" data-corner="tl">
+                  <span class="corner-dot corner-dot-tl" title="Top-Left Vertex (0,1)">●</span>
+                  <span class="corner-badge">TL</span>
+                  <div id="xyCornerTL" class="xy-corner-selector"></div>
+                </div>
+                <div class="legend-item" data-corner="tr">
+                  <span class="corner-dot corner-dot-tr" title="Top-Right Vertex (1,1)">●</span>
+                  <span class="corner-badge">TR</span>
+                  <div id="xyCornerTR" class="xy-corner-selector"></div>
+                </div>
+                <div class="legend-item" data-corner="bl">
+                  <span class="corner-dot corner-dot-bl" title="Bottom-Left Vertex (0,0)">●</span>
+                  <span class="corner-badge">BL</span>
+                  <div id="xyCornerBL" class="xy-corner-selector"></div>
+                </div>
+                <div class="legend-item" data-corner="br">
+                  <span class="corner-dot corner-dot-br" title="Bottom-Right Vertex (1,0)">●</span>
+                  <span class="corner-badge">BR</span>
+                  <div id="xyCornerBR" class="xy-corner-selector"></div>
+                </div>
               </div>
             </div>
-            <div id="recordStatus" class="record-status" aria-live="polite">Ready</div>
-          </div>
 
-          <!-- Theme Toggle -->
-          <div class="grid-item grid-item-theme">
-            <div class="param-grid">
-              <div class="param-tile" data-tile="theme">
-                <div class="tile-header">THEME</div>
-                <button id="themeToggle" class="knob" title="Toggle theme (dark/light)" style="cursor: pointer;"><div class="knob-fill" style="height: 0%;"></div><span id="themeIcon" class="knob-plus"></span></button>
-                <div class="tile-value">0</div>
-              </div>
+            <div class="xy-pad-canvas-container">
+              <canvas id="xyPad" width="800" height="800"></canvas>
             </div>
           </div>
 
-          <!-- Value Display Box -->
-          <div id="valueDisplayBox" class="grid-item grid-item-value-display">
-            <div class="value-display-label">—</div>
-            <div class="value-display-value">—</div>
+          <!-- Bottom Status Bar -->
+          <div class="xy-bottom-bar">
+            <span class="xy-hint">
+              <span class="hint-text">Use arrow keys</span>
+              <span class="hint-arrows">
+                <span class="arrow-key">←</span>
+                <span class="arrow-key">↑</span>
+                <span class="arrow-key">→</span>
+                <span class="arrow-key">↓</span>
+              </span>
+              <span class="hint-text">to navigate topographic space</span>
+            </span>
+          </div>
+        </main>
+
+        <!-- Sidebar: vertical category rail + dedicated views -->
+        <aside class="app-sidebar">
+          <nav class="sidebar-rail" role="tablist" aria-label="Sidebar views">
+            <button type="button" class="sidebar-rail-btn is-active" data-view="pads" role="tab" aria-selected="true" aria-controls="sidebar-view-pads" title="Pads">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+                <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+              </svg>
+              <span>Pads</span>
+            </button>
+            <button type="button" class="sidebar-rail-btn" data-view="fx" role="tab" aria-selected="false" aria-controls="sidebar-view-fx" title="Effects">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/>
+                <line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/>
+                <line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/>
+                <line x1="2" y1="14" x2="6" y2="14"/><line x1="10" y1="8" x2="14" y2="8"/><line x1="18" y1="16" x2="22" y2="16"/>
+              </svg>
+              <span>FX</span>
+            </button>
+            <button type="button" class="sidebar-rail-btn" data-view="seq" role="tab" aria-selected="false" aria-controls="sidebar-view-seq" title="Marker sequencer">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/>
+                <path d="M7 12h3M14 12h3"/>
+              </svg>
+              <span>Seq</span>
+            </button>
+            <button type="button" class="sidebar-rail-btn" data-view="motion" role="tab" aria-selected="false" aria-controls="sidebar-view-motion" title="Motion path">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 18c3-9 5 3 8-2s4-9 8-4"/>
+                <circle cx="4" cy="18" r="1.5"/><circle cx="20" cy="12" r="1.5"/>
+              </svg>
+              <span>Path</span>
+            </button>
+            <button type="button" class="sidebar-rail-btn" data-view="io" role="tab" aria-selected="false" aria-controls="sidebar-view-io" title="MIDI, XY, recorder">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 3v6"/><path d="M8 7l4-4 4 4"/>
+                <path d="M12 21v-6"/><path d="M8 17l4 4 4-4"/>
+                <circle cx="12" cy="12" r="2"/>
+              </svg>
+              <span>I/O</span>
+            </button>
+          </nav>
+
+          <div class="sidebar-stage">
+            <div class="sidebar-status" role="status">
+              <span id="sidebarStatusPad" class="status-chip">PAD —</span>
+              <span id="sidebarStatusSeq" class="status-chip">SEQ OFF</span>
+              <span id="recordStatus" class="status-chip record-status" aria-live="polite">Ready</span>
+            </div>
+
+            <div class="sidebar-views">
+              <section id="sidebar-view-pads" class="sidebar-view is-active" data-view="pads" role="tabpanel">
+                <div class="sidebar-rack rack-pads">
+                  <div class="rack-header">
+                    <span class="rack-title">PAD MATRIX</span>
+                    <div class="rack-header-actions">
+                      <button id="clearActivePadBtn" class="rack-action-btn" title="Clear active pad assignment" aria-label="Clear active pad assignment">
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                          <polyline points="3 6 5 6 21 6"></polyline>
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        </svg>
+                      </button>
+                      <span class="rack-badge">3</span>
+                    </div>
+                  </div>
+                  <div class="rack-body pad-matrix-body">
+                    <div class="grid-item-pads">
+                      <div id="padGrid" class="pad-grid"></div>
+                    </div>
+                    <div class="pad-recall-bar">
+                      <div class="param-tile recall-tile" data-tile="recall">
+                        <span class="recall-label">RECALL PARAMS</span>
+                        <div class="knob toggle-switch-knob active" data-knob="recall" data-tooltip="Recall parameters per pad - ON: smooth transition, OFF: instant"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                        <div class="tile-value" data-val="recall">ON</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section id="sidebar-view-fx" class="sidebar-view" data-view="fx" role="tabpanel" hidden>
+                <div class="sidebar-rack rack-effects">
+                  <div class="rack-header">
+                    <span class="rack-title">EFFECTS RACK</span>
+                    <span class="rack-badge">DSP</span>
+                  </div>
+                  <div class="rack-body param-grid-6col">
+                    <div class="param-tile" data-tile="filter">
+                      <div class="tile-header">FILTER</div>
+                      <div class="knob" data-knob="filter" data-tooltip="Filter cutoff frequency in Hz (200-12000Hz)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                      <div class="tile-value" data-val="filter">4000</div>
+                    </div>
+                    <div class="param-tile" data-tile="res">
+                      <div class="tile-header">RES</div>
+                      <div class="knob" data-knob="res" data-tooltip="Filter resonance/Q factor (0-20)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                      <div class="tile-value" data-val="res">0</div>
+                    </div>
+                    <div class="param-tile" data-tile="dtime">
+                      <div class="tile-header">DLY-T</div>
+                      <div class="knob" data-knob="dtime" data-tooltip="Delay time in seconds (0-1.2s)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                      <div class="tile-value" data-val="dtime">0.25</div>
+                    </div>
+                    <div class="param-tile" data-tile="dmix">
+                      <div class="tile-header">DLY-M</div>
+                      <div class="knob" data-knob="dmix" data-tooltip="Delay mix amount (0-1)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                      <div class="tile-value" data-val="dmix">0.15</div>
+                    </div>
+                    <div class="param-tile" data-tile="reverb">
+                      <div class="tile-header">REVERB</div>
+                      <div class="knob" data-knob="reverb" data-tooltip="Reverb mix amount (0-1)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                      <div class="tile-value" data-val="reverb">0.2</div>
+                    </div>
+                    <div class="param-tile" data-tile="gain">
+                      <div class="tile-header">GAIN</div>
+                      <div class="knob" data-knob="gain" data-tooltip="Master gain/output volume (0-1.5)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                      <div class="tile-value" data-val="gain">0.9</div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section id="sidebar-view-seq" class="sidebar-view" data-view="seq" role="tabpanel" hidden>
+                <div class="sidebar-rack rack-marker-full">
+                  <div class="rack-header">
+                    <span class="rack-title">MARKER SEQUENCER</span>
+                    <span class="rack-badge">GENERATIVE</span>
+                  </div>
+                  <div class="rack-body marker-rack-body">
+                    <div class="param-grid-2col">
+                      <div class="param-tile" data-tile="marker-play">
+                        <div class="tile-header">PLAY</div>
+                        <button id="markerPlayBtn" class="knob knob-btn" title="Arm marker sequencer for this pad" style="cursor: pointer;">
+                          <div class="knob-fill" style="height: 0%;"></div>
+                          <span class="knob-icon knob-icon-play" aria-hidden="true"></span>
+                          <span class="knob-icon knob-icon-stop" aria-hidden="true"></span>
+                        </button>
+                        <div class="tile-value">0</div>
+                      </div>
+                      <div class="param-tile" data-tile="marker-clear">
+                        <div class="tile-header">CLEAR</div>
+                        <button id="markerClearBtn" class="knob knob-btn" title="Clear all markers on this pad" style="cursor: pointer;">
+                          <div class="knob-fill" style="height: 0%;"></div>
+                          <span class="knob-plus">+</span>
+                        </button>
+                        <div class="tile-value">0</div>
+                      </div>
+                    </div>
+                    <div class="param-tile" data-tile="marker-order">
+                      <div class="tile-header">ORDER</div>
+                      <div class="option-selector" data-selector="marker-order" data-tooltip="Playback order: Forward, Reverse, PingPong, Wander (local walk), Random, Shuffle">
+                        <button class="option-selector-btn" data-direction="prev" aria-label="Previous option">‹</button>
+                        <span class="option-selector-label" data-label="marker-order">Forward</span>
+                        <button class="option-selector-btn" data-direction="next" aria-label="Next option">›</button>
+                      </div>
+                    </div>
+                    <div class="param-tile" data-tile="marker-rate">
+                      <div class="tile-header">RATE</div>
+                      <div class="option-selector" data-selector="marker-rate" data-tooltip="Clock: 16s / 8s / 4s (free time), or 2/1, 1/1, 1/2, 1/4, 1/8, triplets, 1/16">
+                        <button class="option-selector-btn" data-direction="prev" aria-label="Previous option">‹</button>
+                        <span class="option-selector-label" data-label="marker-rate">1/16</span>
+                        <button class="option-selector-btn" data-direction="next" aria-label="Next option">›</button>
+                      </div>
+                    </div>
+                    <div class="param-grid-2col">
+                      <div class="param-tile" data-tile="marker-pattern">
+                        <div class="tile-header">PATTERN</div>
+                        <div class="option-selector" data-selector="marker-pattern" data-tooltip="Rhythm: Off, Straight, Euclid, Clave (3-2 son), Thue-Morse, Burst">
+                          <button class="option-selector-btn" data-direction="prev" aria-label="Previous option">‹</button>
+                          <span class="option-selector-label" data-label="marker-pattern">Straight</span>
+                          <button class="option-selector-btn" data-direction="next" aria-label="Next option">›</button>
+                        </div>
+                      </div>
+                      <div class="param-tile" data-tile="marker-grain">
+                        <div class="tile-header">GRAIN</div>
+                        <div class="option-selector" data-selector="marker-grain" data-tooltip="Cloud: grains around the marker. Pulse: burst. Glide: smear between markers. Bloom: density swell. Stutter: triple hit. Flam: humanized double">
+                          <button class="option-selector-btn" data-direction="prev" aria-label="Previous option">‹</button>
+                          <span class="option-selector-label" data-label="marker-grain">Cloud</span>
+                          <button class="option-selector-btn" data-direction="next" aria-label="Next option">›</button>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="param-grid-2col">
+                      <div class="param-tile" data-tile="marker-bpm">
+                        <div class="tile-header">BPM</div>
+                        <div class="knob" data-knob="marker-bpm" data-tooltip="Marker sequencer tempo (40-200 BPM)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                        <div class="tile-value" data-val="marker-bpm">120</div>
+                      </div>
+                      <div class="param-tile" data-tile="marker-chance">
+                        <div class="tile-header">CHANCE</div>
+                        <div class="knob" data-knob="marker-chance" data-tooltip="Probability a pattern hit actually fires. Misses linger on the same marker"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                        <div class="tile-value" data-val="marker-chance">100%</div>
+                      </div>
+                    </div>
+                    <div id="markerEuclidRow" class="param-grid-2col" hidden>
+                      <div class="param-tile" data-tile="marker-euclid-hits">
+                        <div class="tile-header">HITS</div>
+                        <div class="knob" data-knob="marker-euclid-hits" data-tooltip="Hits per cycle (Euclid/Burst) or rotation (Clave/Thue)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                        <div class="tile-value" data-val="marker-euclid-hits">5</div>
+                      </div>
+                      <div class="param-tile" data-tile="marker-euclid-steps">
+                        <div class="tile-header">STEPS</div>
+                        <div class="knob" data-knob="marker-euclid-steps" data-tooltip="Cycle length in steps"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                        <div class="tile-value" data-val="marker-euclid-steps">8</div>
+                      </div>
+                    </div>
+                    <div id="markerHoldTile" class="param-tile is-disabled" data-tile="marker-hold">
+                      <div class="tile-header">HOLD</div>
+                      <div class="knob" data-knob="marker-hold" data-tooltip="Extra steps to stay on the selected marker (0-8). Select a marker on the waveform"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                      <div class="tile-value" data-val="marker-hold">—</div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section id="sidebar-view-motion" class="sidebar-view" data-view="motion" role="tabpanel" hidden>
+                <div class="sidebar-rack rack-motion-full">
+                  <div class="rack-header">
+                    <span class="rack-title">MOTION PATH STUDIO</span>
+                    <span class="rack-badge">AUTOMATION</span>
+                  </div>
+                  <div class="rack-body motion-full-wrap">
+                    <div class="motion-canvas-wrap-large">
+                      <canvas id="motionCanvas" width="240" height="240"></canvas>
+                      <div id="motionCursor"></div>
+                    </div>
+                    <div class="motion-controls-vertical">
+                      <div class="param-grid-2col">
+                        <div class="param-tile" data-tile="motion-play">
+                          <div class="tile-header">PLAY</div>
+                          <button id="motionPlayBtn" class="knob knob-btn" title="Play/Pause" style="cursor: pointer;">
+                            <div class="knob-fill" style="height: 0%;"></div>
+                            <span class="knob-icon knob-icon-play" aria-hidden="true"></span>
+                            <span class="knob-icon knob-icon-stop" aria-hidden="true"></span>
+                          </button>
+                          <div class="tile-value">0</div>
+                        </div>
+                        <div class="param-tile" data-tile="motion-clear">
+                          <div class="tile-header">CLEAR</div>
+                          <button id="motionClearBtn" class="knob knob-btn" title="Clear Path" style="cursor: pointer;"><div class="knob-fill" style="height: 0%;"></div><span class="knob-plus">+</span></button>
+                          <div class="tile-value">0</div>
+                        </div>
+                      </div>
+                      <div class="param-tile" data-tile="motion-loop">
+                        <div class="tile-header">LOOP MODE</div>
+                        <div class="option-selector" data-selector="motion-loop" data-tooltip="Motion path loop mode: Loop, PingPong, OneShot, Reverse">
+                          <button class="option-selector-btn" data-direction="prev" aria-label="Previous option">‹</button>
+                          <span class="option-selector-label" data-label="motion-loop">Loop</span>
+                          <button class="option-selector-btn" data-direction="next" aria-label="Next option">›</button>
+                        </div>
+                        <div class="tile-value" data-val="motion-loop" style="display: none;">Loop</div>
+                      </div>
+                      <div class="param-tile" data-tile="motion-speed">
+                        <div class="tile-header">SPEED</div>
+                        <div class="knob" data-knob="motion-speed" data-tooltip="Motion path playback speed (0.1-4.0x)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                        <div class="tile-value" data-val="motion-speed">1.0</div>
+                      </div>
+                      <select id="motionLoopMode" style="display: none;">
+                        <option value="loop">Loop</option>
+                        <option value="pingpong">Ping Pong</option>
+                        <option value="oneshot">One Shot</option>
+                        <option value="reverse">Reverse</option>
+                      </select>
+                      <input id="motionSpeed" type="range" min="0.1" max="4" step="0.1" value="1" style="display: none;" />
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section id="sidebar-view-io" class="sidebar-view" data-view="io" role="tabpanel" hidden>
+                <div class="sidebar-rack rack-io">
+                  <div class="utility-section">
+                    <div class="rack-header">XY DYNAMICS</div>
+                    <div class="param-grid-2col">
+                      <div class="param-tile" data-tile="xyspeed">
+                        <div class="tile-header">RATE</div>
+                        <div class="knob" data-knob="xyspeed" data-tooltip="XY pad cursor movement rate (0.01-2.0)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                        <div class="tile-value" data-val="xyspeed">0.15</div>
+                      </div>
+                      <div class="param-tile" data-tile="xyshift">
+                        <div class="tile-header">SHIFT</div>
+                        <div class="knob" data-knob="xyshift" data-tooltip="XY pad cursor shift amount (0.01-1.0)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                        <div class="tile-value" data-val="xyshift">0.05</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="utility-section">
+                    <div class="rack-header">MIDI ENGINE</div>
+                    <div class="param-grid-2col">
+                      <div class="param-tile" data-tile="midi-learn">
+                        <div class="tile-header">LEARN</div>
+                        <div class="knob toggle-switch-knob" data-knob="midi-learn" data-tooltip="Enable MIDI learn mode"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                        <div class="tile-value" data-val="midi-learn">OFF</div>
+                      </div>
+                      <div class="param-tile" data-tile="midi-clear">
+                        <div class="tile-header">CLEAR</div>
+                        <button id="midiClear" class="knob knob-btn" title="Remove all MIDI assignments" style="cursor: pointer;"><div class="knob-fill" style="height: 0%;"></div><span class="knob-plus">+</span></button>
+                        <div class="tile-value">0</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="utility-section utility-section-recorder">
+                    <div class="rack-header">RECORDER</div>
+                    <div class="param-grid-3col">
+                      <div class="param-tile" data-tile="record-audio">
+                        <div class="tile-header">AUDIO</div>
+                        <button id="recordBtn" class="rack-action-btn rec-btn" title="Start audio recording">
+                          <div class="knob-fill" style="height: 0%;"></div>
+                          <span class="action-icon">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                              <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                              <line x1="12" y1="19" x2="12" y2="23"></line>
+                            </svg>
+                          </span>
+                        </button>
+                        <div class="tile-value">0</div>
+                      </div>
+                      <div class="param-tile" data-tile="record-video">
+                        <div class="tile-header">VIDEO</div>
+                        <button id="recordVideoBtn" class="rack-action-btn rec-btn" title="Start video + audio recording">
+                          <div class="knob-fill" style="height: 0%;"></div>
+                          <span class="action-icon">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                              <polygon points="23 7 16 12 23 17 23 7"></polygon>
+                              <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                            </svg>
+                          </span>
+                        </button>
+                        <div class="tile-value">0</div>
+                      </div>
+                      <div class="param-tile" data-tile="stop">
+                        <div class="tile-header">STOP</div>
+                        <button id="stopRecordBtn" class="rack-action-btn" disabled title="Stop recording">
+                          <div class="knob-fill" style="height: 0%;"></div>
+                          <span class="action-icon">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                              <rect x="5" y="5" width="14" height="14" rx="2"></rect>
+                            </svg>
+                          </span>
+                        </button>
+                        <div class="tile-value">0</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
           </div>
         </aside>
       </div>

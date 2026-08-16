@@ -138,6 +138,22 @@ class GranularProcessor extends AudioWorkletProcessor {
         if (this.useWasm && this.wasmEnginePtr) {
             this.wasmInstance.exports.granularengine_set_playing(this.wasmEnginePtr, this.running);
         }
+      } else if (msg?.type === 'setGrainAnchor') {
+        if (this.useWasm && this.wasmEnginePtr) {
+            this.wasmInstance.exports.granularengine_set_grain_anchor(
+                this.wasmEnginePtr,
+                msg.sample ?? 0,
+                !!msg.enabled
+            );
+        }
+      } else if (msg?.type === 'setAutoSpawn') {
+        if (this.useWasm && this.wasmEnginePtr) {
+            this.wasmInstance.exports.granularengine_set_auto_spawn(this.wasmEnginePtr, !!msg.enabled);
+        }
+      } else if (msg?.type === 'spawnNow') {
+        if (this.useWasm && this.wasmEnginePtr) {
+            this.wasmInstance.exports.granularengine_spawn_now(this.wasmEnginePtr, (msg.count|0) || 1);
+        }
       }
     };
   }

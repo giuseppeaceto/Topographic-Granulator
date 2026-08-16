@@ -40,14 +40,13 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 	// enlarge slightly
 	scene.scale.set(1.12, 1.12, 1);
 
-	// Lighting for the 3D sphere - softer, more neumorphic lighting
-	const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+	// Lighting — subtle, focused
+	const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
 	scene.add(ambientLight);
-	// Multiple directional lights for softer, more diffused neumorphic effect
-	const directionalLight1 = new THREE.DirectionalLight(0xffffff, 0.6);
+	const directionalLight1 = new THREE.DirectionalLight(0xffffff, 0.5);
 	directionalLight1.position.set(1, 1, 1);
 	scene.add(directionalLight1);
-	const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.4);
+	const directionalLight2 = new THREE.DirectionalLight(0xffeedd, 0.25);
 	directionalLight2.position.set(-1, -1, 0.5);
 	scene.add(directionalLight2);
 
@@ -102,13 +101,13 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 	const lines = new THREE.LineSegments(geometry, material);
 	scene.add(lines);
 
-	// Knob (3D sphere) rendered above the grid - neumorphic style
+	// Cursor sphere — copper/warm tone matching accent
 	const knobGeom = new THREE.SphereGeometry(1, 16, 16);
 	const knobMat = new THREE.MeshStandardMaterial({ 
-		color: 0xd0d0d0,
-		metalness: 0.0, // No metallic look for neumorphic style
-		roughness: 0.75, // More matte, less reflective for neumorphic look
-		flatShading: false // Smooth shading but with high roughness
+		color: 0xd4855a,   // accent2: siena/copper warm
+		metalness: 0.3,
+		roughness: 0.6,
+		flatShading: false
 	});
 	const knob = new THREE.Mesh(knobGeom, knobMat);
 	scene.add(knob);
@@ -201,13 +200,13 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 		}
 		
 		const mat = new THREE.MeshStandardMaterial({
-			color: 0x88ccff,
-			emissive: 0x2244aa,
+			color: 0xC4703A,     // accent: siena/copper
+			emissive: 0x7A3A18,
 			emissiveIntensity: 0.3,
-			metalness: 0.6,
-			roughness: 0.3,
+			metalness: 0.5,
+			roughness: 0.4,
 			transparent: true,
-			opacity: 0.8
+			opacity: 0.85
 		});
 		
 		const mesh = new THREE.Mesh(geom, mat);
@@ -225,15 +224,17 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 	let rippleT0 = 0; // seconds
 	function syncBufferToCss() {
 		const rect = canvas.getBoundingClientRect();
-		const sideCss = Math.max(1, Math.min(rect.width, rect.height || rect.width));
+		const widthCss = Math.max(1, rect.width);
+		const heightCss = Math.max(1, rect.height);
 		const dpr = Math.max(1, Math.floor(window.devicePixelRatio || 1));
-		const target = Math.floor(sideCss * dpr);
-		if (target !== bufferW || target !== bufferH) {
-			bufferW = target;
-			bufferH = target;
+		const targetW = Math.floor(widthCss * dpr);
+		const targetH = Math.floor(heightCss * dpr);
+		if (targetW !== bufferW || targetH !== bufferH) {
+			bufferW = targetW;
+			bufferH = targetH;
 			renderer.setSize(bufferW, bufferH, false);
-			// update camera aspect
-			camera.aspect = 1; // canvas è quadrato
+			// update camera aspect ratio dynamically to fill container area
+			camera.aspect = widthCss / heightCss;
 			camera.updateProjectionMatrix();
 			rebuildLinePositions();
 			renderOnce();
@@ -437,12 +438,12 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 			const mat = symbol.mesh.material as THREE.MeshStandardMaterial;
 			mat.opacity = 0.4 + vertex.weight * 0.6;
 			
-			// Colore che cambia in base al peso (da blu a ciano a bianco)
-			const hue = 0.55 + vertex.weight * 0.15; // da blu a ciano
-			const saturation = 0.6 + vertex.weight * 0.4;
-			const lightness = 0.5 + vertex.weight * 0.5;
+			// Colore in base al peso — tonalità siena/rame
+			const hue = 0.06 + vertex.weight * 0.05; // da arancio a rame
+			const saturation = 0.55 + vertex.weight * 0.35;
+			const lightness = 0.38 + vertex.weight * 0.35;
 			mat.color.setHSL(hue, saturation, lightness);
-			mat.emissive.setHSL(hue, saturation * 0.5, lightness * 0.3);
+			mat.emissive.setHSL(hue, saturation * 0.5, lightness * 0.2);
 		}
 
 		// For each vertex compute height and brightness based on distance to knob
@@ -517,6 +518,8 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 
 	function renderOnce() {
 		syncBufferToCss();
+		updateCornerAnimations();
+		updateCornerSelectPositions();
 		// Tilt the whole scene slightly to get a horizon look
 		scene.rotation.x = -0.9;
 		renderer.render(scene, camera);
@@ -524,17 +527,20 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 
 	let animId: number | null = null;
 	let animating = false;
+	let hasActiveGhosts = false;
 	const maxRippleDuration = 3.0; // seconds
 	function animate() {
 		tSec = (performance.now() - tStart) / 1000;
 		const elapsed = Math.max(0, tSec - rippleT0);
 		syncBufferToCss();
 		updateColorsAndKnob();
+		updateCornerAnimations();
+		updateCornerSelectPositions();
 		scene.rotation.x = -0.9;
 		renderer.render(scene, camera);
-		// Continua l'animazione se c'è un ripple attivo O se c'è animazione della densità
+		// Continua l'animazione se c'è un ripple attivo, animazione della densità, vertice hovered o ghost attivi
 		const hasDensityAnimation = densityCornerWeight > 0;
-		if (elapsed < maxRippleDuration || hasDensityAnimation) {
+		if (elapsed < maxRippleDuration || hasDensityAnimation || hasActiveGhosts || dragging || hoveredCorner !== null) {
 			animId = requestAnimationFrame(animate) as any as number;
 		} else {
 			animId = null;
@@ -562,10 +568,122 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 		renderOnce();
     }
 
+	// 3D Corner Vertices Group & Meshes
+	const cornersGroup = new THREE.Group();
+	scene.add(cornersGroup);
+
+	type CornerKey = 'tl' | 'tr' | 'bl' | 'br';
+	type CornerNode = {
+		key: CornerKey;
+		mesh: THREE.Mesh;
+		mat: THREE.MeshStandardMaterial;
+		worldPos: THREE.Vector3;
+	};
+
+	const cornerNodes: Record<CornerKey, CornerNode> = {} as any;
+	const cornerConfigs: Array<{ key: CornerKey; x: number; y: number; color: number }> = [
+		{ key: 'tl', x: 0, y: 1, color: 0x7EB4D8 }, // Top-Left (steel blue)
+		{ key: 'tr', x: 1, y: 1, color: 0x7EB87E }, // Top-Right (sage green)
+		{ key: 'bl', x: 0, y: 0, color: 0xA880C0 }, // Bottom-Left (dusty violet)
+		{ key: 'br', x: 1, y: 0, color: 0xC4703A }, // Bottom-Right (copper/accent)
+	];
+
+	// Small wireframe sphere geometry for each corner vertex
+	const cornerGeom = new THREE.SphereGeometry(0.035, 12, 10);
+
+	cornerConfigs.forEach(({ key, x, y, color }) => {
+		const mat = new THREE.MeshStandardMaterial({
+			color: color,
+			emissive: color,
+			emissiveIntensity: 0.4,
+			wireframe: true,
+			transparent: true,
+			opacity: 0.85
+		});
+		const mesh = new THREE.Mesh(cornerGeom, mat);
+
+		const group = new THREE.Group();
+		group.add(mesh);
+		
+		// Position at corner vertex
+		const worldPos = new THREE.Vector3(x, y, 0.04);
+		group.position.copy(worldPos);
+		cornersGroup.add(group);
+
+		cornerNodes[key] = {
+			key,
+			mesh,
+			mat,
+			worldPos
+		};
+	});
+
+	let cornerClickCb: ((cornerKey: CornerKey, ev: PointerEvent) => void) | null = null;
+	function onCornerClick(cb: (cornerKey: CornerKey, ev: PointerEvent) => void) {
+		cornerClickCb = cb;
+	}
+
+	let hoveredCorner: CornerKey | null = null;
+
 	// Raycasting helpers to map pointer to the tilted plane in perspective
 	const raycaster = new THREE.Raycaster();
 	const ndc = new THREE.Vector2();
 	const tmpVec3 = new THREE.Vector3();
+
+	function checkCornerHover(ev: PointerEvent): CornerKey | null {
+		const rect = canvas.getBoundingClientRect();
+		if (rect.width <= 0 || rect.height <= 0) return null;
+		ndc.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+		ndc.y = -(((ev.clientY - rect.top) / rect.height) * 2 - 1);
+		raycaster.setFromCamera(ndc, camera);
+
+		const cornerMeshes = Object.values(cornerNodes).map(n => n.mesh);
+		const intersects = raycaster.intersectObjects(cornerMeshes, false);
+		if (intersects.length > 0) {
+			const hitMesh = intersects[0].object;
+			for (const node of Object.values(cornerNodes)) {
+				if (node.mesh === hitMesh) return node.key;
+			}
+		}
+
+		// Also allow hitting near corner points via plane distance
+		const planeNormal = new THREE.Vector3(0, 0, 1).applyQuaternion(scene.quaternion);
+		const planePoint = scene.localToWorld(new THREE.Vector3(0, 0, 0));
+		const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal, planePoint);
+		const hit = raycaster.ray.intersectPlane(plane, tmpVec3);
+		if (hit) {
+			const local = scene.worldToLocal(hit.clone());
+			const hitX = local.x;
+			const hitY = local.y;
+			const threshold = 0.12; // 12% corner hit zone radius
+			for (const node of Object.values(cornerNodes)) {
+				const dx = hitX - node.worldPos.x;
+				const dy = hitY - node.worldPos.y;
+				if (Math.sqrt(dx * dx + dy * dy) < threshold) {
+					return node.key;
+				}
+			}
+		}
+		return null;
+	}
+
+	function updateCornerAnimations() {
+		const now = tSec;
+		Object.values(cornerNodes).forEach((node) => {
+			const isHovered = hoveredCorner === node.key;
+			
+			// Gentle rotation for the wireframe sphere
+			node.mesh.rotation.y = now * 0.8 + (node.key === 'tl' ? 0 : node.key === 'tr' ? 1 : node.key === 'bl' ? 2 : 3);
+			node.mesh.rotation.x = now * 0.4;
+
+			const targetScale = isHovered ? 1.4 : 1.0 + Math.sin(now * 3) * 0.05;
+			node.mesh.scale.setScalar(targetScale);
+
+			node.mat.emissiveIntensity = isHovered ? 0.9 : 0.4 + Math.sin(now * 4) * 0.1;
+			node.mat.opacity = isHovered ? 1.0 : 0.85;
+		});
+	}
+
 	function pointerToPos(ev: PointerEvent) {
 		const rect = canvas.getBoundingClientRect();
 		if (rect.width <= 0 || rect.height <= 0) return { x: pos.x, y: pos.y };
@@ -584,18 +702,47 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 		return { x, y };
 	}
 
+	let pointerDownCorner: CornerKey | null = null;
+
 	function onPointerDown(ev: PointerEvent) {
+		const corner = checkCornerHover(ev);
+		if (corner) {
+			pointerDownCorner = corner;
+			return;
+		}
+		pointerDownCorner = null;
 		dragging = true;
 		(canvas as any).setPointerCapture?.(ev.pointerId);
 		const p = pointerToPos(ev);
 		setPosition(p.x, p.y);
 	}
+
 	function onPointerMove(ev: PointerEvent) {
+		const corner = checkCornerHover(ev);
+		if (corner !== hoveredCorner) {
+			hoveredCorner = corner;
+			canvas.style.cursor = corner ? 'pointer' : 'crosshair';
+			if (!animating) {
+				animating = true;
+				animate();
+			}
+		}
+
 		if (!dragging) return;
 		const p = pointerToPos(ev);
 		setPosition(p.x, p.y);
 	}
+
 	function onPointerUp(ev: PointerEvent) {
+		if (pointerDownCorner) {
+			const corner = checkCornerHover(ev);
+			if (corner === pointerDownCorner) {
+				cornerClickCb?.(corner, ev);
+			}
+			pointerDownCorner = null;
+			return;
+		}
+
 		if (!dragging) return;
 		dragging = false;
 		(canvas as any).releasePointerCapture?.(ev.pointerId);
@@ -612,7 +759,11 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 	canvas.addEventListener('pointerdown', onPointerDown);
 	canvas.addEventListener('pointermove', onPointerMove);
 	canvas.addEventListener('pointerup', onPointerUp);
-	canvas.addEventListener('pointerleave', onPointerUp);
+	canvas.addEventListener('pointerleave', (ev) => {
+		hoveredCorner = null;
+		canvas.style.cursor = 'crosshair';
+		onPointerUp(ev);
+	});
 
 	// Smooth keyboard navigation: hold arrows to move continuously with RAF
 	const kbPressed = new Set<string>();
@@ -673,9 +824,13 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 	function onChange(f: (p: { x: number; y: number }) => void) { cb = f; }
 	function emit() { cb?.(getPosition()); }
 
+	function updateCornerSelectPositions() {
+		// Corner selectors are now housed inside the Legend Panel (.xy-legend-panel)
+	}
+
 	function setCornerLabels(l: CornerLabels) {
 		labels = { ...labels, ...l };
-		// Labels are currently not rendered in the Three.js layer; reserved for future overlay
+		updateCornerSelectPositions();
 	}
 
 	const ro = new ResizeObserver(() => {
@@ -727,11 +882,17 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 	}
 
     function setGhostPositions(positions: { x: number, y: number, colorIndex: number }[]) {
+        hasActiveGhosts = positions.length > 0;
         updateGhosts(positions);
-        renderOnce();
+        if (hasActiveGhosts && !animating) {
+            animating = true;
+            animate();
+        } else {
+            renderOnce();
+        }
     }
 
-	return { setPosition, getPosition, onChange, setCornerLabels, setSpeed, setReverbMix, setFilterCutoff, setDensity, updateTheme, setPositionSilent, setGhostPositions };
+	return { setPosition, getPosition, onChange, setCornerLabels, setSpeed, setReverbMix, setFilterCutoff, setDensity, updateTheme, setPositionSilent, setGhostPositions, onCornerClick };
 }
 
 

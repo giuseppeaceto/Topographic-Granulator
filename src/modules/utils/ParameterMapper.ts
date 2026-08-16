@@ -49,7 +49,7 @@ export class ParameterMapper {
         const influenceMap = new Map<ParamId, number>();
         
         const addInfluence = (idStr: string, w: number) => {
-            if (!idStr) return;
+            if (!idStr || idStr === 'none') return;
             if (idStr.startsWith('pad:')) return; // Skip pad morphing
             const id = idStr as ParamId;
             influenceMap.set(id, (influenceMap.get(id) || 0) + w);

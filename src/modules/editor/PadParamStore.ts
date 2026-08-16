@@ -1,5 +1,6 @@
 import type { GranularParams } from '../granular/GranularWorkletEngine';
 import type { EffectsParams } from '../effects/EffectsChain';
+import { defaultMarkerSeq, mergeMarkerSeq, type MarkerSeqParams } from './MarkerStore';
 
 export type MotionPoint = {
 	x: number;
@@ -16,8 +17,9 @@ export type PadParams = {
 	motionPath?: MotionPoint[];
     motionMode?: MotionMode;
     motionSpeed?: number;
-    xySpeed?: number; // Speed for keyboard arrow movement (normal)
+	xySpeed?: number; // Speed for keyboard arrow movement (normal)
     xyShift?: number; // Speed for keyboard arrow movement with Shift key
+	markerSeq: MarkerSeqParams;
 };
 
 export function defaultGranular(): GranularParams {
@@ -41,7 +43,8 @@ export function createPadParamStore(size: number) {
         motionMode: 'loop',
         motionSpeed: 1.0,
         xySpeed: 0.15, // Default normal speed
-        xyShift: 0.05  // Default shift speed
+        xyShift: 0.05,  // Default shift speed
+		markerSeq: defaultMarkerSeq()
 	}));
 
 	function get(index: number): PadParams {
@@ -57,7 +60,10 @@ export function createPadParamStore(size: number) {
             motionMode: params.motionMode !== undefined ? params.motionMode : current.motionMode,
             motionSpeed: params.motionSpeed !== undefined ? params.motionSpeed : current.motionSpeed,
             xySpeed: params.xySpeed !== undefined ? params.xySpeed : (current.xySpeed ?? 0.15),
-            xyShift: params.xyShift !== undefined ? params.xyShift : (current.xyShift ?? 0.05)
+            xyShift: params.xyShift !== undefined ? params.xyShift : (current.xyShift ?? 0.05),
+			markerSeq: params.markerSeq
+				? mergeMarkerSeq(current.markerSeq ?? defaultMarkerSeq(), params.markerSeq)
+				: (current.markerSeq ?? defaultMarkerSeq())
 		};
 	}
 	function setGranular(index: number, granular: Partial<GranularParams>) {
@@ -75,6 +81,10 @@ export function createPadParamStore(size: number) {
     function setMotionParams(index: number, mode: MotionMode, speed: number) {
         set(index, { motionMode: mode, motionSpeed: speed });
     }
+	function setMarkerSeq(index: number, patch: Partial<MarkerSeqParams>) {
+		const current = store[index]?.markerSeq ?? defaultMarkerSeq();
+		set(index, { markerSeq: mergeMarkerSeq(current, patch) });
+	}
 	function add() {
 		store.push({
 			granular: defaultGranular(),
@@ -83,7 +93,8 @@ export function createPadParamStore(size: number) {
             motionMode: 'loop',
             motionSpeed: 1.0,
             xySpeed: 0.15,
-            xyShift: 0.05
+            xyShift: 0.05,
+			markerSeq: defaultMarkerSeq()
 		});
 	}
 	function remove(index: number) {
@@ -92,5 +103,5 @@ export function createPadParamStore(size: number) {
 	function size() {
 		return store.length;
 	}
-	return { get, set, setGranular, setEffects, setXY, setMotionPath, setMotionParams, add, remove, size };
+	return { get, set, setGranular, setEffects, setXY, setMotionPath, setMotionParams, setMarkerSeq, add, remove, size };
 }

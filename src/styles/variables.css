@@ -1,0 +1,175 @@
+:root {
+  /* ─── Undergrain Design System ─── Bauhaus × Topographic ───
+   * Dark theme (default)
+   * Palette: warm black surfaces + siena/copper accent + warm whites
+   */
+
+  /* Surfaces (layered depth: 0 = deepest, 3 = highest interactive) */
+  --surface-0:      #111110;
+  --surface-1:      #191918;
+  --surface-2:      #222220;
+  --surface-3:      #2A2A28;
+  --surface-4:      #343430;
+
+  /* Background & panel */
+  --bg:             #0C0C0B;
+  --panel:          var(--surface-1);
+  --panel-header:   var(--surface-0);
+
+  /* Text */
+  --text:           #E8E4DC;
+  --muted:          #9E9A92;
+  --dim:            #5A5852;
+
+  /* Accent: siena/copper — cartographic, geological */
+  --accent:         #C4703A;
+  --accent2:        #D4855A;
+  --accent-dim:     rgba(196, 112, 58, 0.14);
+  --accent-glow:    rgba(196, 112, 58, 0.38);
+  --accent-border:  rgba(196, 112, 58, 0.35);
+
+  /* Borders */
+  --border:         #2A2A28;
+  --border-subtle:  #252523;
+  --border-strong:  #3A3A36;
+
+  /* Buttons */
+  --btn-bg:         var(--surface-2);
+  --btn-bg-hover:   var(--surface-3);
+  --btn-border:     var(--border);
+  --btn-border-hover: var(--border-strong);
+
+  /* Pads */
+  --pad-bg:         var(--surface-1);
+  --pad-active:     var(--accent-dim);
+
+  /* Waveform */
+  --waveform-wrap:  var(--surface-0);
+  --waveform-bg:    #0C0C0B;
+
+  /* XY Pad */
+  --xy-pad-bg:      #0C0C0B;
+  --xy-wrap:        var(--surface-0);
+  --contour:        #2E2E2C;
+
+  /* Knob */
+  --knob-bg:        var(--surface-2);
+  --knob-indicator: var(--accent);
+  --knob-dot-color: var(--accent);
+  --knob-plus-color: var(--muted);
+
+  /* Tile typography */
+  --tile-header-color: var(--muted);
+  --tile-value-color:  var(--text);
+
+  /* Form elements */
+  --select-bg:      var(--surface-2);
+  --select-border:  var(--border);
+  --dropdown-bg:    var(--surface-1);
+  --dropdown-shadow: rgba(0, 0, 0, 0.6);
+  --toolbar-shadow:  rgba(0, 0, 0, 0.45);
+
+  /* Learn / MIDI indicator */
+  --learn-outline:  var(--accent);
+
+  /* Dividers */
+  --hr-color:       var(--border);
+
+  /* Toggle slider */
+  --toggle-slider-bg:     var(--surface-2);
+  --toggle-slider-thumb:  var(--muted);
+  --toggle-slider-active: var(--accent);
+
+  /* Danger */
+  --warn:          #D4855A;
+  --danger:        #C0392B;
+  --danger-bg:     rgba(192, 57, 43, 0.12);
+  --danger-border: rgba(192, 57, 43, 0.4);
+
+  /* Category accent colors — kept but adjusted for warm dark */
+  --color-granular:      #7EB4D8;   /* blue-steel */
+  --color-effects:       #7EB87E;   /* sage green */
+  --color-motion:        #A880C0;   /* dusty violet */
+  --color-file:          #C4703A;   /* same as accent/copper */
+  --color-recording:     #C0392B;   /* same as danger */
+  --color-midi:          #9E6DB0;   /* muted purple */
+  --color-control:       var(--accent);
+  --color-accent-subtle: var(--accent-dim);
+}
+
+[data-theme="light"] {
+  /* Light theme — functional, simplified */
+  --surface-0:      #F0EDEA;
+  --surface-1:      #FAFAF8;
+  --surface-2:      #F2EFE9;
+  --surface-3:      #E4E0D8;
+  --surface-4:      #D8D4CC;
+
+  --bg:             #E8E4DF;
+  --panel:          var(--surface-1);
+  --panel-header:   var(--surface-0);
+
+  --text:           #1E1C18;
+  --muted:          #6A6660;
+  --dim:            #A4A09A;
+
+  --accent:         #A85D2A;
+  --accent2:        #C47040;
+  --accent-dim:     rgba(168, 93, 42, 0.12);
+  --accent-glow:    rgba(168, 93, 42, 0.3);
+  --accent-border:  rgba(168, 93, 42, 0.3);
+
+  --border:         #D0CCC4;
+  --border-subtle:  #DDD9D0;
+  --border-strong:  #B8B4AC;
+
+  --btn-bg:         var(--surface-2);
+  --btn-bg-hover:   var(--surface-3);
+  --btn-border:     var(--border);
+  --btn-border-hover: var(--border-strong);
+
+  --pad-bg:         var(--surface-1);
+  --pad-active:     var(--accent-dim);
+
+  --waveform-wrap:  var(--surface-0);
+  --waveform-bg:    #FAFAF8;
+
+  --xy-pad-bg:      #E8E4DF;
+  --xy-wrap:        var(--surface-0);
+  --contour:        #D8D4CC;
+
+  --knob-bg:        var(--surface-2);
+  --knob-indicator: var(--accent);
+  --knob-dot-color: var(--accent);
+  --knob-plus-color: var(--muted);
+
+  --tile-header-color: var(--muted);
+  --tile-value-color:  var(--text);
+
+  --select-bg:      var(--surface-2);
+  --select-border:  var(--border);
+  --dropdown-bg:    var(--surface-1);
+  --dropdown-shadow: rgba(0, 0, 0, 0.15);
+  --toolbar-shadow:  rgba(0, 0, 0, 0.1);
+
+  --learn-outline:  var(--accent);
+  --hr-color:       var(--border);
+
+  --toggle-slider-bg:     var(--surface-3);
+  --toggle-slider-thumb:  var(--muted);
+  --toggle-slider-active: var(--accent);
+
+  --warn:          #C47040;
+  --danger:        #A0251C;
+  --danger-bg:     rgba(160, 37, 28, 0.1);
+  --danger-border: rgba(160, 37, 28, 0.35);
+
+  --color-granular:      #2E7DB0;
+  --color-effects:       #3A8C3A;
+  --color-motion:        #7A4EA0;
+  --color-file:          var(--accent);
+  --color-recording:     var(--danger);
+  --color-midi:          #7050A0;
+  --color-control:       var(--accent);
+  --color-accent-subtle: var(--accent-dim);
+}

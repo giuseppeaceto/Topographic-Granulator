@@ -1,0 +1,225 @@
+/* ─── Undergrain Custom Select Dropdown ─── */
+
+.custom-select {
+  position: relative;
+  width: 100%;
+}
+
+.xy-pad-canvas-container > .custom-select {
+  position: absolute;
+  width: auto;
+  min-width: 110px;
+  max-width: 140px;
+  z-index: 10;
+}
+
+.custom-select-button {
+  width: 100%;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+  text-align: left;
+  min-height: 28px;
+  user-select: none;
+}
+
+.custom-select-button:hover {
+  border-color: var(--accent);
+}
+
+.custom-select-button.active {
+  background: var(--surface-3);
+  border-color: var(--accent);
+}
+
+.custom-select-icon {
+  font-size: 12px;
+  line-height: 1;
+  flex-shrink: 0;
+  width: 14px;
+  text-align: center;
+  color: var(--accent);
+}
+
+.custom-select-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.custom-select-arrow {
+  font-size: 9px;
+  color: var(--muted);
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.custom-select-button.active .custom-select-arrow {
+  transform: rotate(180deg);
+}
+
+/* ─── Dropdown Menu ─── */
+.custom-select-dropdown {
+  position: fixed;
+  background: var(--surface-1);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+  z-index: 1000;
+  max-height: 200px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: none;
+  margin-top: 4px;
+}
+
+.custom-select-dropdown.open-up {
+  margin-top: 0;
+  margin-bottom: 2px;
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.55);
+}
+
+.custom-select-option {
+  padding: 6px 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-family: 'Space Grotesk', sans-serif;
+  color: var(--text);
+  transition: background 0.12s ease, color 0.12s ease;
+  border-radius: 2px;
+  margin: 2px;
+  user-select: none;
+}
+
+.custom-select-option:hover {
+  background: var(--surface-3);
+}
+
+.custom-select-option.selected {
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-left: 2px solid var(--accent);
+}
+
+.custom-select-option:focus {
+  outline: none;
+  background: var(--surface-3);
+}
+
+.custom-select-option .custom-select-icon {
+  color: var(--accent);
+}
+
+/* ─── 3D Vertex Corner Legend Panel (Horizontal DAW Toolstrip HUD) ─── */
+.xy-legend-panel {
+  position: relative;
+  width: 100%;
+  background: var(--surface-0);
+  border-bottom: 1px solid var(--border);
+  padding: 6px 14px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+  z-index: 20;
+  user-select: none;
+  box-shadow: none;
+}
+
+.legend-header {
+  display: flex;
+  align-items: center;
+  padding-bottom: 0;
+  border-bottom: none;
+  flex-shrink: 0;
+}
+
+.legend-title {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  text-transform: uppercase;
+}
+
+.legend-items {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  flex: 1;
+  align-items: center;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  background: var(--surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  padding: 2px 6px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.legend-item:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+}
+
+.corner-badge {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--muted);
+  width: 16px;
+  flex-shrink: 0;
+}
+
+.corner-dot {
+  font-size: 9px;
+  line-height: 1;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.corner-dot-tl { color: var(--color-granular); }
+.corner-dot-tr { color: var(--color-effects); }
+.corner-dot-bl { color: var(--color-motion); }
+.corner-dot-br { color: var(--accent); }
+
+.legend-item .xy-corner-selector {
+  flex: 1;
+  min-width: 0;
+}
+
+.legend-item .custom-select-button {
+  height: 24px;
+  min-height: 24px;
+  padding: 2px 4px;
+  font-size: 10px;
+  background: transparent;
+  border: none;
+}
+
+.legend-item .custom-select-button:hover {
+  background: transparent;
+}

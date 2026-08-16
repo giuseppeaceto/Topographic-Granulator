@@ -1,0 +1,293 @@
+/* ─── Undergrain Precision Instrument Knob System ─── */
+
+/* ─── 1. Precision Dial Base (.knob) ─── */
+.knob {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  user-select: none;
+  overflow: hidden;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: inset 0 0 0 2px var(--surface-0);
+}
+
+/* Outer Ring & Arc Sweep Container */
+.knob::before {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 225deg,
+    var(--accent) 0deg,
+    var(--accent) calc(var(--knob-percent, 0) * 270deg),
+    var(--surface-3) calc(var(--knob-percent, 0) * 270deg),
+    var(--surface-3) 270deg,
+    transparent 270deg
+  );
+  mask: radial-gradient(transparent 15px, #000 16px);
+  -webkit-mask: radial-gradient(transparent 15px, #000 16px);
+  pointer-events: none;
+  transition: background 0.05s ease-out;
+}
+
+/* Inner Dial Face */
+.knob::after {
+  content: '';
+  position: absolute;
+  inset: 5px;
+  border-radius: 50%;
+  background: var(--surface-1);
+  border: 1px solid var(--border-subtle);
+  pointer-events: none;
+}
+
+.knob:hover {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 2px var(--surface-0), 0 0 0 2px var(--accent-dim);
+}
+
+.knob:active {
+  transform: scale(0.96);
+}
+
+.knob button,
+.knob label {
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  z-index: 5;
+}
+
+/* ─── 2. Rotating Needle Pointer ─── */
+.knob-plus {
+  position: absolute;
+  z-index: 6;
+  width: 2px;
+  height: 12px;
+  top: 5px;
+  left: calc(50% - 1px);
+  background: var(--accent);
+  border-radius: 1px;
+  transform-origin: 50% 17px;
+  transform: rotate(var(--knob-deg, -135deg));
+  transition: transform 0.05s ease-out, background-color 0.15s ease;
+  pointer-events: none;
+  font-size: 0; /* Hide text fallback */
+}
+
+/* Hide legacy vertical fill element */
+.knob-fill {
+  display: none !important;
+}
+
+/* ─── 3. Category Color Overrides for Arc Sweep & Needle ─── */
+.grid-item-params .knob::before {
+  background: conic-gradient(
+    from 225deg,
+    var(--color-granular) 0deg,
+    var(--color-granular) calc(var(--knob-percent, 0) * 270deg),
+    var(--surface-3) calc(var(--knob-percent, 0) * 270deg),
+    var(--surface-3) 270deg,
+    transparent 270deg
+  );
+}
+
+.grid-item-params .knob-plus {
+  background: var(--color-granular);
+}
+
+.grid-item-effects .knob::before {
+  background: conic-gradient(
+    from 225deg,
+    var(--color-effects) 0deg,
+    var(--color-effects) calc(var(--knob-percent, 0) * 270deg),
+    var(--surface-3) calc(var(--knob-percent, 0) * 270deg),
+    var(--surface-3) 270deg,
+    transparent 270deg
+  );
+}
+
+.grid-item-effects .knob-plus {
+  background: var(--color-effects);
+}
+
+.grid-item-motion-controls .knob::before {
+  background: conic-gradient(
+    from 225deg,
+    var(--color-motion) 0deg,
+    var(--color-motion) calc(var(--knob-percent, 0) * 270deg),
+    var(--surface-3) calc(var(--knob-percent, 0) * 270deg),
+    var(--surface-3) 270deg,
+    transparent 270deg
+  );
+}
+
+.grid-item-motion-controls .knob-plus {
+  background: var(--color-motion);
+}
+
+.grid-item-recording .knob::before {
+  background: conic-gradient(
+    from 225deg,
+    var(--color-recording) 0deg,
+    var(--color-recording) calc(var(--knob-percent, 0) * 270deg),
+    var(--surface-3) calc(var(--knob-percent, 0) * 270deg),
+    var(--surface-3) 270deg,
+    transparent 270deg
+  );
+}
+
+.grid-item-recording .knob-plus {
+  background: var(--color-recording);
+}
+
+.grid-item-midi .knob::before {
+  background: conic-gradient(
+    from 225deg,
+    var(--color-midi) 0deg,
+    var(--color-midi) calc(var(--knob-percent, 0) * 270deg),
+    var(--surface-3) calc(var(--knob-percent, 0) * 270deg),
+    var(--surface-3) 270deg,
+    transparent 270deg
+  );
+}
+
+.grid-item-midi .knob-plus {
+  background: var(--color-midi);
+}
+
+.grid-item-xyspeed .knob::before,
+.grid-item-zoom .knob::before,
+.grid-item-nudge .knob::before {
+  background: conic-gradient(
+    from 225deg,
+    var(--color-control) 0deg,
+    var(--color-control) calc(var(--knob-percent, 0) * 270deg),
+    var(--surface-3) calc(var(--knob-percent, 0) * 270deg),
+    var(--surface-3) 270deg,
+    transparent 270deg
+  );
+}
+
+.grid-item-xyspeed .knob-plus,
+.grid-item-zoom .knob-plus,
+.grid-item-nudge .knob-plus {
+  background: var(--color-control);
+}
+
+/* ─── 4. Toggle Switch Knob ─── */
+.knob.toggle-switch-knob {
+  width: 48px;
+  height: 24px;
+  border-radius: 12px;
+  position: relative;
+  cursor: pointer;
+  box-shadow: none;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.knob.toggle-switch-knob::before,
+.knob.toggle-switch-knob::after {
+  content: none;
+}
+
+.knob.toggle-switch-knob .knob-switch-thumb {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--muted);
+  top: 2px;
+  left: 2px;
+  transition: left 0.2s ease, background-color 0.2s ease;
+  z-index: 2;
+}
+
+.knob.toggle-switch-knob.active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+}
+
+.knob.toggle-switch-knob.active .knob-switch-thumb {
+  left: 26px;
+  background: var(--accent);
+}
+
+.knob.toggle-switch-knob .knob-plus {
+  display: none !important;
+}
+
+/* ─── 5. Option Selector (Loop Mode, etc.) ─── */
+.option-selector {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 28px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 3px;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.option-selector:hover {
+  border-color: var(--accent);
+}
+
+.option-selector-btn {
+  width: 20px;
+  height: 20px;
+  border-radius: 2px;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  user-select: none;
+  flex-shrink: 0;
+  transition: color 0.12s ease;
+}
+
+.option-selector-btn:hover {
+  color: var(--text);
+}
+
+.option-selector-label {
+  flex: 1;
+  text-align: center;
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0 4px;
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

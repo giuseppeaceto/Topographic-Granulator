@@ -67,3 +67,4 @@ Se ci sono errori, li vedrai nella console con prefisso `[Auto-updater]`.
 - Il file DMG viene aperto manualmente per l'installazione
 
 
+

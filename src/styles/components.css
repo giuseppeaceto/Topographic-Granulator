@@ -1,0 +1,581 @@
+/* ─── Undergrain UI Components System ─── */
+
+/* ─── 1. General Buttons (.btn) ─── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 12px;
+  min-height: 28px;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.btn:active {
+  background: var(--surface-3);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  border-color: var(--border);
+}
+
+.btn.primary {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.btn.primary:hover {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.btn.btn-danger {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border-color: var(--danger-border);
+}
+
+.btn.btn-danger:hover {
+  background: var(--danger);
+  color: #ffffff;
+}
+
+.btn-icon {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+}
+
+/* ─── 2. Header Buttons (.header-btn & .action-btn-knob) ─── */
+.header-btn,
+.action-btn-knob,
+.rack-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 10px;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  overflow: hidden;
+  gap: 6px;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.header-btn:hover,
+.action-btn-knob:hover,
+.rack-action-btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.header-btn:active,
+.action-btn-knob:active,
+.rack-action-btn:active {
+  background: var(--surface-3);
+}
+
+.header-btn-icon {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+}
+
+.header-theme-toggle {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  padding: 0;
+}
+
+/* Audio File Loader Button */
+.file-load-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-border);
+  color: var(--accent);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.file-load-btn:hover {
+  background: var(--accent);
+  color: #ffffff;
+  border-color: var(--accent);
+}
+
+.file-load-btn .btn-text {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+/* ─── 3. Help Button ─── */
+.help-button {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.help-button:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.help-button:active {
+  background: var(--surface-3);
+}
+
+/* ─── 4. Recorder & Mini Buttons ─── */
+.rec-btn {
+  color: var(--muted);
+}
+
+.rec-btn:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.knob-mini-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.knob-mini-btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+/* ─── 5. Badges & Labels ─── */
+.beta-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 5px;
+  margin-left: 6px;
+  font-family: 'DM Mono', monospace;
+  font-size: 8px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-border);
+  border-radius: 2px;
+  height: 16px;
+  line-height: 1;
+}
+
+.rack-badge {
+  font-family: 'DM Mono', monospace;
+  font-size: 8px;
+  font-weight: 500;
+  padding: 1px 5px;
+  border-radius: 2px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  border: 1px solid var(--accent-border);
+  letter-spacing: 0.05em;
+}
+
+.filename-badge {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--muted);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 4px;
+  background: transparent;
+  border: none;
+}
+
+/* ─── 6. Segmented Controls ─── */
+.segmented-control {
+  display: inline-flex;
+  align-items: center;
+  background: var(--surface-2);
+  padding: 2px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  gap: 2px;
+}
+
+.xy-mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.xy-mode-btn.active {
+  color: var(--text);
+  background: var(--surface-3);
+  border-bottom: 2px solid var(--accent);
+  padding-bottom: 2px;
+}
+
+.xy-mode-btn:hover:not(.active) {
+  color: var(--text);
+}
+
+.xy-mode-icon {
+  display: flex;
+  align-items: center;
+}
+
+/* ─── 7. Modals ─── */
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+
+.modal.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.modal-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.7);
+}
+
+.modal-content {
+  position: relative;
+  background: var(--surface-1);
+  border: 1px solid var(--border-strong);
+  border-top: 2px solid var(--accent);
+  border-radius: 4px;
+  padding: 20px 24px;
+  width: 340px;
+  max-width: 90vw;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+}
+
+.modal-content.quickstart-modal {
+  width: 680px;
+  max-width: 95vw;
+  min-height: 260px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
+}
+
+.modal-content h3 {
+  margin-top: 0;
+  margin-bottom: 16px;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+/* Quickstart Specifics */
+.quickstart-intro {
+  margin-top: 0;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.quickstart-steps {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.quickstart-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.quickstart-step-icon {
+  flex: 0 0 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--accent-border);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.quickstart-step-icon svg {
+  width: 15px;
+  height: 15px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+}
+
+.quickstart-step-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.quickstart-step-body strong {
+  color: var(--text);
+}
+
+.quickstart-extra {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.quickstart-actions {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* Icon grid (pad edit modal) */
+.icon-grid {
+  max-height: 200px;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.icon-option {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 40px;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface-2);
+  cursor: pointer;
+  color: var(--muted);
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.icon-option svg {
+  width: 20px;
+  height: 20px;
+}
+
+.icon-option:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.icon-option.selected {
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ─── 8. Tooltips ─── */
+.custom-tooltip {
+  position: absolute;
+  background: var(--surface-0);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  border-radius: 3px;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: normal;
+  word-wrap: break-word;
+  pointer-events: none;
+  z-index: 10000;
+  opacity: 0;
+  transform: translateY(-3px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  max-width: 220px;
+}
+
+.custom-tooltip.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ─── 9. Scale Selector (Pitch Tile) ─── */
+
+/* Pitch tile gets a slightly taller layout to fit the scale selector */
+.pitch-tile-wide {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+}
+
+.scale-selector-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  margin-top: 4px;
+  width: 100%;
+  height: 16px;
+}
+
+.scale-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 12px;
+  font-family: 'Space Grotesk', sans-serif;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: color 0.12s ease, background 0.12s ease;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.scale-nav-btn:hover {
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.scale-nav-btn:active {
+  color: var(--text);
+}
+
+.scale-name {
+  font-family: 'DM Mono', monospace;
+  font-size: 7px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-border);
+  border-radius: 2px;
+  padding: 1px 4px;
+  min-width: 32px;
+  text-align: center;
+  line-height: 12px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* When scale is Chromatic (off), tone it down visually */
+.scale-name.scale-off {
+  color: var(--muted);
+  background: transparent;
+  border-color: var(--border);
+}
+

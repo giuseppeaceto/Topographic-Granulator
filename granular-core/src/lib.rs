@@ -23,26 +23,42 @@ impl Rng {
     }
 }
 
-// Struttura Grain interna
+// Struttura Grain interna con precisione f64 per evitare perdita di precisione su campioni grandi
+#[derive(Clone, Copy)]
 struct Grain {
-    start_sample: f32, 
-    end_sample: f32,   
-    length: f32,       
-    age: f32,          
-    rate: f32,         
-    amp: f32,          
+    active: bool,
+    start_sample: f64, 
+    end_sample: f64,   
+    length: f64,       
+    age: f64,          
+    rate: f64,         
+    amp: f32,
+    tight: bool,
 }
 
 impl Grain {
-    fn new(start: f32, length: f32, rate: f32) -> Self {
+    fn empty() -> Self {
         Grain {
-            start_sample: start,
-            end_sample: start + (length * rate), 
-            length,
+            active: false,
+            start_sample: 0.0,
+            end_sample: 0.0,
+            length: 0.0,
             age: 0.0,
-            rate,
+            rate: 1.0,
             amp: 1.0,
+            tight: false,
         }
+    }
+
+    fn init(&mut self, start: f64, length: f64, rate: f64, tight: bool) {
+        self.active = true;
+        self.start_sample = start;
+        self.end_sample = start + (length * rate);
+        self.length = length;
+        self.age = 0.0;
+        self.rate = rate;
+        self.amp = 1.0;
+        self.tight = tight;
     }
 }
 
@@ -55,17 +71,22 @@ pub fn alloc(len: usize) -> *mut f32 {
     ptr
 }
 
+const MAX_GRAINS: usize = 512;
+
 #[wasm_bindgen]
 pub struct GranularEngine {
     sample_rate: f32,
     audio_buffer: Vec<f32>,
-    grains: Vec<Grain>,
+    grains: [Grain; MAX_GRAINS],
     
     // Params
     grain_size_ms: f32,
     density: f32,
     random_start_ms: f32,
     pitch_semitones: f32,
+    target_pitch_semitones: f64,
+    current_pitch_semitones: f64,
+    pitch_smooth_alpha: f64,
     
     // Effects
     filter: BiquadFilter,
@@ -86,6 +107,9 @@ pub struct GranularEngine {
     region_end: usize,
     is_playing: bool,
     rng: Rng,
+    grain_anchor_enabled: bool,
+    grain_anchor_sample: f64,
+    auto_spawn: bool,
 }
 
 #[wasm_bindgen]
@@ -95,12 +119,15 @@ impl GranularEngine {
         GranularEngine {
             sample_rate,
             audio_buffer: Vec::new(),
-            grains: Vec::with_capacity(1000),
+            grains: [Grain::empty(); MAX_GRAINS],
             
             grain_size_ms: 80.0,
             density: 15.0,
             random_start_ms: 40.0,
             pitch_semitones: 0.0,
+            target_pitch_semitones: 0.0,
+            current_pitch_semitones: 0.0,
+            pitch_smooth_alpha: 1.0 - (-1.0 / (0.045 * sample_rate as f64)).exp(), // ~45ms portamento glide
             
             filter: BiquadFilter::new(sample_rate),
             delay: DelayLine::new(2000.0, sample_rate), // 2s max delay
@@ -118,6 +145,9 @@ impl GranularEngine {
             region_end: 0,
             is_playing: false,
             rng: Rng::new(12345),
+            grain_anchor_enabled: false,
+            grain_anchor_sample: 0.0,
+            auto_spawn: true,
         }
     }
     
@@ -141,6 +171,7 @@ impl GranularEngine {
         self.density = density;
         self.random_start_ms = random_start_ms;
         self.pitch_semitones = pitch_semitones;
+        self.target_pitch_semitones = pitch_semitones as f64;
     }
     
     fn set_effect_params_internal(&mut self, cutoff: f32, q: f32, delay_time_ms: f32, delay_feedback: f32, delay_mix: f32, reverb_mix: f32, master_gain: f32) {
@@ -166,6 +197,7 @@ impl GranularEngine {
         self.density = density;
         self.random_start_ms = random_start_ms;
         self.pitch_semitones = pitch_semitones;
+        self.target_pitch_semitones = pitch_semitones as f64;
         
         // FX
         self.filter.set_params(cutoff, q);
@@ -186,8 +218,7 @@ impl GranularEngine {
     
     fn set_playing_internal(&mut self, playing: bool) {
         self.is_playing = playing;
-        // Reset effects state on stop? Or keep ringing? 
-        // Keeping ringing is usually nicer.
+        // Keeping ringing on stop is nicer
     }
 
     fn process_internal(&mut self, output_ptr: *mut f32, len: usize) {
@@ -196,112 +227,144 @@ impl GranularEngine {
         let density = self.density.max(0.1);
         let interval_samples = self.sample_rate / density;
         
-        // Pre-fetch constants to avoid struct lookup in tight loop
         let delay_mix = self.delay_mix;
         let delay_fb = self.delay_feedback;
         let delay_time = self.delay_time_ms;
         let master_gain = self.master_gain;
+        let buf_len = self.audio_buffer.len();
 
-        // Se non sta suonando e il buffer non è vuoto, output silenzio (o coda riverbero?)
-        // Per ora: se non playing, il loop sotto non genera grani, ma il delay/reverb tail continua?
-        // La logica attuale:
-        // if !playing:
-        //    if empty buffer -> loop skip -> output zero (initialized to 0 in JS?)
-        //    Wait, JS initializes output to 0.
-        //    Here we overwrite output[i] with calculated sample.
-        
-        // Se is_playing == false, spawn_grain non parte.
-        // Ma delay/reverb devono processare "silenzio" in ingresso per far suonare la coda.
-        // Quindi OK iterare anche se !is_playing, basta che current_sample resti 0.
-        
         for i in 0..len {
             let mut current_sample = 0.0;
             
+            // Smooth pitch per-sample (Pitch Glide / Portamento in 64-bit precision)
+            self.current_pitch_semitones += (self.target_pitch_semitones - self.current_pitch_semitones) * self.pitch_smooth_alpha;
+            let current_rate = 2.0f64.powf(self.current_pitch_semitones / 12.0);
+            
             // 1. Granular Generation
-            if !self.audio_buffer.is_empty() && self.is_playing {
+            if buf_len > 0 && self.is_playing && self.auto_spawn {
                 self.time_since_last_grain += 1.0;
                 if self.time_since_last_grain >= interval_samples {
-                    self.spawn_grain();
+                    self.spawn_grain(false);
                     self.time_since_last_grain -= interval_samples;
                 }
             }
 
-            // Process active grains (sempre, anche se playing stoppato, per far finire i grani correnti)
-            if !self.grains.is_empty() {
-                let mut j = 0;
-                while j < self.grains.len() {
-                    let remove = {
-                        let g = &mut self.grains[j];
-                        
-                        let env_pos = g.age / g.length;
-                        // Simple trapezoidal window
-                        let attack = 0.2f32.min(10.0 / g.length);
-                        let release = 0.25f32.min(12.0 / g.length);
-                        
-                        let mut amp = 0.0;
-                        if env_pos < attack {
-                            amp = env_pos / attack.max(1e-6);
-                        } else if env_pos > 1.0 - release {
-                            amp = (1.0 - env_pos) / release.max(1e-6);
-                        } else {
-                            amp = 1.0;
-                        }
-
-                        let pos_int = g.start_sample as usize;
-                        let frac = g.start_sample - pos_int as f32;
-
-                        let s = if pos_int < self.audio_buffer.len() - 1 {
-                            let s1 = self.audio_buffer[pos_int];
-                            let s2 = self.audio_buffer[pos_int + 1];
-                            s1 + (s2 - s1) * frac
-                        } else {
-                            0.0
-                        };
-                        
-                        current_sample += s * amp;
-
-                        g.start_sample += g.rate;
-                        g.age += 1.0;
-                        g.age >= g.length
+            // 2. Process active grains in zero-allocation pool with 64-bit precision
+            if buf_len > 0 {
+                for g in self.grains.iter_mut() {
+                    if !g.active {
+                        continue;
+                    }
+                    
+                    let env_pos = (g.age / g.length) as f32;
+                    let attack = if g.tight {
+                        (3.0 / g.length as f32).min(0.04)
+                    } else {
+                        0.2f32.min((10.0 / g.length) as f32)
+                    };
+                    let release = 0.25f32.min((12.0 / g.length) as f32);
+                    
+                    let amp = if env_pos < attack {
+                        env_pos / attack.max(1e-6)
+                    } else if env_pos > 1.0 - release {
+                        (1.0 - env_pos) / release.max(1e-6)
+                    } else {
+                        1.0
                     };
 
-                    if remove {
-                        self.grains.swap_remove(j);
+                    let reg_start = self.region_start;
+                    let reg_end = self.region_end.max(reg_start + 1);
+                    let reg_len = reg_end - reg_start;
+
+                    let raw_pos = g.start_sample.floor() as usize;
+                    let rel_pos = if raw_pos >= reg_start { raw_pos - reg_start } else { 0 };
+                    let clamped_pos = reg_start + (rel_pos % reg_len);
+                    let next_pos = reg_start + ((rel_pos + 1) % reg_len);
+                    let frac = (g.start_sample - g.start_sample.floor()) as f32;
+
+                    let s = if clamped_pos < buf_len && next_pos < buf_len {
+                        let s1 = self.audio_buffer[clamped_pos];
+                        let s2 = self.audio_buffer[next_pos];
+                        s1 + (s2 - s1) * frac
                     } else {
-                        j += 1;
+                        0.0
+                    };
+                    
+                    current_sample += s * amp;
+
+                    // Dynamically advance sample position using 64-bit float smoothed pitch rate
+                    g.start_sample += current_rate;
+                    g.age += 1.0;
+                    if g.age >= g.length {
+                        g.active = false;
                     }
                 }
             }
 
-            // 2. Filter (Post-granulator)
+            // 3. Filter (Post-granulator)
             let filtered = self.filter.process(current_sample);
             
-            // 3. Delay
+            // 4. Delay
             let delayed_sig = self.delay.read(delay_time);
             let delay_in = filtered + (delayed_sig * delay_fb);
             self.delay.write(delay_in);
             
             let delay_out = filtered * (1.0 - delay_mix) + delayed_sig * delay_mix;
             
-            // 4. Reverb
+            // 5. Reverb
             let reverb_out = self.reverb.process(delay_out);
             
-            // 5. Master Gain
+            // 6. Master Gain
             output[i] = reverb_out * master_gain;
         }
     }
 
-    fn spawn_grain(&mut self) {
-        let rand_val = self.rng.next_f32(); 
-        let rand_offset = (rand_val * 2.0 - 1.0) * (self.random_start_ms / 1000.0) * self.sample_rate;
+    fn set_grain_anchor_internal(&mut self, sample: f64, enabled: bool) {
+        self.grain_anchor_enabled = enabled;
+        self.grain_anchor_sample = sample.max(0.0);
+    }
+
+    fn set_auto_spawn_internal(&mut self, enabled: bool) {
+        self.auto_spawn = enabled;
+    }
+
+    fn spawn_now_internal(&mut self, count: u32) {
+        let n = count.max(1).min(32);
+        for _ in 0..n {
+            self.spawn_grain(true);
+        }
+        self.time_since_last_grain = 0.0;
+    }
+
+    fn spawn_grain(&mut self, tight: bool) {
+        let reg_start = self.region_start as f64;
+        let reg_end = self.region_end as f64;
+        let reg_len = (reg_end - reg_start).max(1.0);
+
+        let origin = if self.grain_anchor_enabled {
+            self.grain_anchor_sample
+        } else {
+            reg_start
+        };
+
+        let rand_val = self.rng.next_f32() as f64; 
+        let max_rand_offset = ((self.random_start_ms / 1000.0) as f64 * (self.sample_rate as f64)).min(reg_len);
+        let rand_offset = (rand_val * 2.0 - 1.0) * max_rand_offset;
         
-        let mut start = self.region_start as f32 + rand_offset;
-        start = start.max(self.region_start as f32).min((self.region_end - 1) as f32);
+        let mut start = origin + rand_offset;
+        if start < reg_start { start = reg_start; }
+        if start >= reg_end { start = (reg_end - 1.0).max(reg_start); }
 
-        let length = (self.grain_size_ms / 1000.0 * self.sample_rate).max(1.0);
-        let rate = 2.0f32.powf(self.pitch_semitones / 12.0);
+        let length = ((self.grain_size_ms / 1000.0) as f64 * (self.sample_rate as f64)).max(1.0);
+        let rate = 2.0f64.powf(self.current_pitch_semitones / 12.0);
 
-        self.grains.push(Grain::new(start, length, rate));
+        // Find first inactive slot in pool
+        for g in self.grains.iter_mut() {
+            if !g.active {
+                g.init(start, length, rate, tight);
+                break;
+            }
+        }
     }
 }
 
@@ -353,6 +416,21 @@ pub fn granularengine_set_all_params(
 #[wasm_bindgen]
 pub fn granularengine_set_playing(engine: &mut GranularEngine, playing: bool) {
     engine.set_playing_internal(playing);
+}
+
+#[wasm_bindgen]
+pub fn granularengine_set_grain_anchor(engine: &mut GranularEngine, sample: f64, enabled: bool) {
+    engine.set_grain_anchor_internal(sample, enabled);
+}
+
+#[wasm_bindgen]
+pub fn granularengine_set_auto_spawn(engine: &mut GranularEngine, enabled: bool) {
+    engine.set_auto_spawn_internal(enabled);
+}
+
+#[wasm_bindgen]
+pub fn granularengine_spawn_now(engine: &mut GranularEngine, count: u32) {
+    engine.spawn_now_internal(count);
 }
 
 #[wasm_bindgen]

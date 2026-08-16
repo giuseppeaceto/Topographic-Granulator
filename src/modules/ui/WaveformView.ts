@@ -1,3 +1,6 @@
+import type { Marker } from '../editor/MarkerStore';
+import { MAX_MARKERS, createMarkerId, sortMarkers } from '../editor/MarkerStore';
+
 export type WaveformSelection = { start: number; end: number };
 
 export function createWaveformView(canvas: HTMLCanvasElement) {
@@ -6,18 +9,36 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 	let selection: WaveformSelection | null = null;
 	let dragging = false;
 	let dragStartX = 0;
-	let dragMode: 'create' | 'move' | 'resize-left' | 'resize-right' | null = null;
+	let dragMode: 'create' | 'move' | 'resize-left' | 'resize-right' | 'marker' | null = null;
 	let moveOffset = 0; // seconds offset used for moving
 	let selectionColor = '#a1e34b';
 	let selectionFill = 'rgba(161, 227, 75, 0.18)';
 	let drawScale = 1; // default scale factor
 	const HANDLE_PX_DRAW = 8;
 	const HANDLE_PX_HIT = 10;
+	const MARKER_HIT_PX = 8;
+
+	let markers: Marker[] = [];
+	let activeMarkerId: string | null = null;
+	let selectedMarkerId: string | null = null;
+	let markerColor = '#C4703A';
+	let regionRange: { start: number; end: number } | null = null;
+	let dragMarkerId: string | null = null;
+
+	let cachedResample: Float32Array | null = null;
+	let cachedWidth = 0;
+	let cachedBuffer: AudioBuffer | null = null;
 
 	function setBuffer(b: AudioBuffer | null) {
 		buffer = b;
+		cachedResample = null;
+		cachedBuffer = null;
+		cachedWidth = 0;
 		// no auto-selection: user must select first
 		selection = null;
+		markers = [];
+		activeMarkerId = null;
+		selectedMarkerId = null;
 		draw();
 	}
 
@@ -61,8 +82,9 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 		const root = getComputedStyle(document.documentElement);
 		const isLight = document.documentElement.getAttribute('data-theme') === 'light';
 		return {
-			bg: root.getPropertyValue('--waveform-bg').trim() || (isLight ? '#ffffff' : '#111111'),
-			muted: root.getPropertyValue('--muted').trim() || (isLight ? '#6e6e73' : '#a9a9a9'),
+			isLight,
+			bg: root.getPropertyValue('--waveform-bg').trim() || (isLight ? '#FAFAF8' : '#0C0C0B'),
+			muted: root.getPropertyValue('--muted').trim() || (isLight ? '#6A6660' : '#9E9A92'),
 			waveformFill: isLight ? 'rgba(30, 30, 30, 0.2)' : 'rgba(179, 179, 179, 0.3)',
 			waveformStroke: isLight ? '#424245' : '#b3b3b3'
 		};
@@ -74,14 +96,9 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 		ctx2d.clearRect(0, 0, w, h);
 		
 		const themeColors = getThemeColors();
-		const isLight = themeColors.bg.includes('#f') || themeColors.bg.includes('255');
+		const isLight = themeColors.isLight;
 		
-		// innovative "topographic" particle look
-		// Force dark background for this specific style if preferred, or adapt
-		const bg = isLight ? '#f0f0f0' : '#050505';
-		const dotColor = isLight ? 'rgba(0,0,0,0.8)' : 'rgba(255,255,255,0.9)';
-		
-		ctx2d.fillStyle = bg;
+		ctx2d.fillStyle = themeColors.bg;
 		ctx2d.fillRect(0, 0, w, h);
 
 		if (!buffer) {
@@ -113,7 +130,12 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 			ctx2d.stroke();
 		}
 
-		const samples = resampleForDraw(buffer, w);
+		if (!cachedResample || cachedWidth !== w || cachedBuffer !== buffer) {
+			cachedResample = resampleForDraw(buffer, w);
+			cachedWidth = w;
+			cachedBuffer = buffer;
+		}
+		const samples = cachedResample;
 		const mid = h / 2;
 		const verticalScale = h * 0.9 * drawScale;
 		
@@ -248,12 +270,128 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 			ctx2d.fillRect(rx - 1, 0, 2, handleH);
 			ctx2d.fillRect(rx - 1, h - handleH, 2, handleH);
 		}
+
+		drawMarkers();
+	}
+
+	function hexToRgba(hex: string, alpha: number): string {
+		const m = hex.replace('#', '');
+		const bigint = parseInt(m.length === 3 ? m.split('').map((c) => c + c).join('') : m, 16);
+		const r = (bigint >> 16) & 255;
+		const g = (bigint >> 8) & 255;
+		const b = bigint & 255;
+		return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+	}
+
+	function drawMarkers() {
+		if (!buffer || markers.length === 0) return;
+		const h = canvas.height;
+		const themeColors = getThemeColors();
+		const sorted = sortMarkers(markers);
+
+		sorted.forEach((m, i) => {
+			const x = timeToX(m.timeSec);
+			const inRegion = !regionRange
+				|| (m.timeSec >= Math.min(regionRange.start, regionRange.end)
+					&& m.timeSec <= Math.max(regionRange.start, regionRange.end));
+			const isActive = m.id === activeMarkerId;
+			const isSelected = m.id === selectedMarkerId;
+
+			ctx2d.save();
+			ctx2d.globalAlpha = inRegion ? 1 : 0.32;
+			ctx2d.strokeStyle = markerColor;
+			ctx2d.lineWidth = isActive ? 2 : 1.25;
+			ctx2d.beginPath();
+			ctx2d.moveTo(x, 0);
+			ctx2d.lineTo(x, h);
+			ctx2d.stroke();
+
+			const capY = 7;
+			const hold = Math.max(0, m.hold ?? 0);
+			const capR = isActive ? 5 : (hold > 0 ? 4.2 : 3.5);
+			if (isActive) {
+				ctx2d.fillStyle = hexToRgba(markerColor, 0.28);
+				ctx2d.beginPath();
+				ctx2d.arc(x, capY, 10, 0, Math.PI * 2);
+				ctx2d.fill();
+			}
+			ctx2d.fillStyle = markerColor;
+			ctx2d.beginPath();
+			ctx2d.arc(x, capY, capR, 0, Math.PI * 2);
+			ctx2d.fill();
+
+			if (isSelected) {
+				ctx2d.strokeStyle = themeColors.isLight ? '#111' : '#fff';
+				ctx2d.lineWidth = 1;
+				ctx2d.stroke();
+			}
+
+			ctx2d.fillStyle = markerColor;
+			ctx2d.font = '8px "DM Mono", monospace';
+			ctx2d.textAlign = 'center';
+			ctx2d.textBaseline = 'top';
+			ctx2d.fillText(String(i + 1), x, 14);
+
+			if (hold > 0) {
+				const hh = 3 + hold * 1.5;
+				ctx2d.fillRect(x - 1.5, h - hh, 3, hh);
+			}
+			ctx2d.restore();
+		});
+	}
+
+	function hitTestMarker(x: number): Marker | null {
+		if (!buffer || markers.length === 0) return null;
+		let best: Marker | null = null;
+		let bestDist = MARKER_HIT_PX;
+		for (const m of markers) {
+			const dist = Math.abs(x - timeToX(m.timeSec));
+			if (dist <= bestDist) {
+				bestDist = dist;
+				best = m;
+			}
+		}
+		return best;
 	}
 
 	function onPointerDown(ev: PointerEvent) {
 		if (!buffer) return;
 		const x = getCanvasXFromEvent(ev);
 		const t = xToTime(x);
+		const markerHit = hitTestMarker(x);
+
+		if (ev.altKey && markerHit) {
+			markers = markers.filter(m => m.id !== markerHit.id);
+			if (selectedMarkerId === markerHit.id) selectedMarkerId = null;
+			if (activeMarkerId === markerHit.id) activeMarkerId = null;
+			draw();
+			events.onMarkersChange?.(markers);
+			events.onMarkerSelect?.(selectedMarkerId);
+			return;
+		}
+
+		if (ev.shiftKey && !markerHit) {
+			if (markers.length >= MAX_MARKERS) return;
+			const created: Marker = { id: createMarkerId(), timeSec: t };
+			markers = sortMarkers([...markers, created]);
+			selectedMarkerId = created.id;
+			draw();
+			events.onMarkersChange?.(markers);
+			events.onMarkerSelect?.(created.id);
+			return;
+		}
+
+		if (markerHit) {
+			dragging = true;
+			dragMode = 'marker';
+			dragMarkerId = markerHit.id;
+			selectedMarkerId = markerHit.id;
+			canvas.setPointerCapture(ev.pointerId);
+			canvas.style.cursor = 'ew-resize';
+			draw();
+			events.onMarkerSelect?.(markerHit.id);
+			return;
+		}
 
 		// Determine hit area
 		let overLeft = false, overRight = false, inside = false;
@@ -288,6 +426,10 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 
 		// cursor hints when not dragging
 		if (!dragging) {
+			if (hitTestMarker(x)) {
+				canvas.style.cursor = 'ew-resize';
+				return;
+			}
 			if (selection) {
 				const selX1 = timeToX(selection.start);
 				const selX2 = timeToX(selection.end);
@@ -311,6 +453,14 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 
 		const t = xToTime(x);
 		switch (dragMode) {
+			case 'marker': {
+				if (!dragMarkerId || !buffer) break;
+				const clamped = Math.max(0, Math.min(t, buffer.duration));
+				markers = sortMarkers(markers.map(m => m.id === dragMarkerId ? { ...m, timeSec: clamped } : m));
+				draw();
+				events.onMarkersChange?.(markers);
+				break;
+			}
 			case 'create': {
 				const t0 = xToTime(dragStartX);
 				setSelection(t0, t);
@@ -361,6 +511,7 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 		if (dragging) {
 			dragging = false;
 			dragMode = null;
+			dragMarkerId = null;
 			canvas.releasePointerCapture(ev.pointerId);
 			canvas.style.cursor = 'default';
 		}
@@ -373,6 +524,8 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 
 	const events: {
 		onSelection?: (sel: WaveformSelection | null) => void;
+		onMarkersChange?: (markers: Marker[]) => void;
+		onMarkerSelect?: (id: string | null) => void;
 	} = {};
 
 	return {
@@ -389,7 +542,36 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 		setColor: (stroke: string, fill?: string) => {
 			selectionColor = stroke;
 			selectionFill = fill ?? selectionFill;
+			markerColor = stroke;
 			draw();
+		},
+		setMarkers: (next: Marker[]) => {
+			markers = sortMarkers(next);
+			draw();
+		},
+		setActiveMarkerId: (id: string | null) => {
+			activeMarkerId = id;
+			draw();
+		},
+		setSelectedMarkerId: (id: string | null) => {
+			selectedMarkerId = id;
+			draw();
+		},
+		getSelectedMarkerId: () => selectedMarkerId,
+		setRegionRange: (range: { start: number; end: number } | null) => {
+			regionRange = range;
+			draw();
+		},
+		onMarkersChange: (cb: (markers: Marker[]) => void) => (events.onMarkersChange = cb),
+		onMarkerSelect: (cb: (id: string | null) => void) => (events.onMarkerSelect = cb),
+		removeSelectedMarker: () => {
+			if (!selectedMarkerId) return false;
+			markers = markers.filter(m => m.id !== selectedMarkerId);
+			selectedMarkerId = null;
+			draw();
+			events.onMarkersChange?.(markers);
+			events.onMarkerSelect?.(null);
+			return true;
 		}
 	};
 }

@@ -1,0 +1,208 @@
+/* ─── Waveform Studio Panel ─── */
+.waveform-studio-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  width: 100%;
+  background: var(--waveform-wrap);
+  border-bottom: 1px solid var(--border);
+}
+
+.waveform-studio-panel .grid-item-waveform {
+  width: 100%;
+  padding: 10px 14px 6px;
+  height: 150px;
+  background: var(--waveform-wrap);
+}
+
+/* ─── Waveform meta (selection info) ─── */
+.waveform-meta {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  color: var(--muted);
+  display: flex;
+  gap: 12px;
+  padding: 2px 0;
+  letter-spacing: 0.04em;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.waveform-hint {
+  margin-left: auto;
+  opacity: 0.7;
+  font-size: 8px;
+  letter-spacing: 0.03em;
+}
+
+/* ─── VST Unified Dock (toolbar row) ─── */
+.vst-dock-row {
+  width: 100%;
+  background: var(--surface-0);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.vst-unified-dock {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 14px;
+  gap: 12px;
+}
+
+.dock-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+.vst-nav-dock {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  gap: 12px;
+}
+
+.vst-dock-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.group-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.filename-badge {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--muted);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 4px;
+  background: transparent;
+  border: none;
+}
+
+.group-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.nudge-inline {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* ─── Nudge mini buttons ─── */
+.knob-mini-btn {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 10px;
+  width: 22px;
+  height: 22px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease;
+}
+
+.knob-mini-btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.nudge-step-tile {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+  background: transparent;
+  padding: 2px 4px;
+}
+
+.nudge-label,
+.zoom-label {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 8px;
+  font-weight: 700;
+  color: var(--dim);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.zoom-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  padding: 2px 4px;
+}
+
+.zoom-slider-mini {
+  width: 60px;
+  height: 3px;
+  accent-color: var(--accent);
+}
+
+.zoom-value-display {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text);
+  min-width: 28px;
+}
+
+.vst-granular-dock {
+  padding: 5px 10px;
+}
+
+/* ─── 5-col param grid (toolbar granular params) ─── */
+.param-grid-5col {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 5px;
+  width: 100%;
+}
+
+.param-grid-5col .param-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 3px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+}
+
+.param-grid-5col .param-tile:hover {
+  border-color: var(--accent);
+}
+
+.zoom-control-inline .zoom-slider {
+  width: 70px;
+  height: 3px;
+}
+
+.zoom-control-inline .zoom-value-display {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text);
+  min-width: 28px;
+}

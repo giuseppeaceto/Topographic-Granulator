@@ -18,6 +18,9 @@ export type GranularWorkletEngine = {
 	setAllParams: (granular: GranularParams, fx: EffectsParams, region: { start: number, end: number }) => void;
 	trigger: () => void;
 	stop: () => void;
+	setGrainAnchor: (sample: number, enabled: boolean) => void;
+	setAutoSpawn: (enabled: boolean) => void;
+	spawnNow: (count?: number) => void;
 };
 
 // Helper to get correct worklet path for Electron and browser
@@ -205,8 +208,17 @@ export async function createGranularWorkletEngine(ctx: AudioContext): Promise<Gr
 		function stop() {
 			node.port.postMessage({ type: 'trigger', on: false });
 		}
+		function setGrainAnchor(sample: number, enabled: boolean) {
+			node.port.postMessage({ type: 'setGrainAnchor', sample, enabled });
+		}
+		function setAutoSpawn(enabled: boolean) {
+			node.port.postMessage({ type: 'setAutoSpawn', enabled });
+		}
+		function spawnNow(count: number = 1) {
+			node.port.postMessage({ type: 'spawnNow', count: Math.max(1, Math.round(count)) });
+		}
 
-		return { connect, disconnect, setBuffer, setRegion, setParams, setEffectParams, setAllParams, trigger, stop };
+		return { connect, disconnect, setBuffer, setRegion, setParams, setEffectParams, setAllParams, trigger, stop, setGrainAnchor, setAutoSpawn, spawnNow };
 	} catch (nodeError) {
 		logger.error('Error creating AudioWorkletNode:', nodeError);
 		throw nodeError;

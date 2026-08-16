@@ -1,0 +1,884 @@
+/* ─── Undergrain Main App Layout System ─── */
+
+/* ─── 1. Root & App Container ─── */
+#app {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.app-layout {
+  display: flex;
+  flex-direction: row;
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ─── 2. Left Column: Waveform Studio & 3D XY Pad Space ─── */
+.xy-pad-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+  background: var(--xy-pad-bg);
+}
+
+/* ─── 2a. Top Bar (Pro DAW Header) ─── */
+.xy-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  height: 46px;
+  min-height: 46px;
+  width: 100%;
+  z-index: 100;
+  background: var(--surface-0);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  gap: 12px;
+}
+
+.xy-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  user-select: none;
+}
+
+.xy-brand .logo-icon {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.xy-brand .app-header-text {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+}
+
+.xy-brand .app-logo-row {
+  display: flex;
+  align-items: center;
+  line-height: 1;
+}
+
+.xy-brand .logo-text {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--text);
+  text-transform: uppercase;
+}
+
+.xy-brand .app-subtitle {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 9px;
+  color: var(--muted);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0.7;
+}
+
+.xy-brand .app-version {
+  font-family: 'DM Mono', monospace;
+  font-size: 8px;
+  opacity: 0.65;
+}
+
+.header-file-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  padding: 0;
+  border: none;
+}
+
+/* Header Parametric Value Display (Center-Right Display Box) */
+.header-value-display {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 4px 12px;
+  height: 28px;
+  min-height: 28px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: 'DM Mono', monospace;
+  min-width: 140px;
+}
+
+.xy-top-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.header-action-btns {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ─── 2b. Waveform Studio Panel (Top section) ─── */
+.waveform-studio-panel {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  background: var(--waveform-wrap);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.waveform-wrap {
+  position: relative;
+  width: 100%;
+  padding: 8px 14px 4px;
+  background: var(--waveform-wrap);
+  height: 130px;
+}
+
+#waveform {
+  width: 100%;
+  height: 100px;
+  display: block;
+  background: var(--waveform-bg);
+  border-radius: 4px;
+}
+
+.waveform-meta {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  color: var(--muted);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+  letter-spacing: 0.04em;
+}
+
+/* VST Unified Dock (Toolbar Row) */
+.vst-dock-row {
+  width: 100%;
+  background: var(--surface-0);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.vst-unified-dock {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 14px;
+  gap: 12px;
+}
+
+.dock-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+.group-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.nudge-inline {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.zoom-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.zoom-slider-mini {
+  width: 60px;
+  height: 3px;
+  accent-color: var(--accent);
+}
+
+.zoom-value-display {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text);
+  min-width: 28px;
+}
+
+.param-grid-5col {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  flex: 1;
+}
+
+/* ─── 2c. 3D XY Pad Wrapper (Middle section) ─── */
+.xy-pad-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.xy-header,
+.xy-assign,
+.xy-pad-canvas-container {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+}
+
+#xyPad {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+/* ─── 2d. Bottom Status Bar ─── */
+.xy-bottom-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 14px;
+  height: 28px;
+  min-height: 28px;
+  background: var(--surface-0);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.xy-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hint-text {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 10px;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.hint-arrows {
+  display: flex;
+  gap: 3px;
+}
+
+.arrow-key {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 1px 4px;
+  background: var(--surface-2);
+  line-height: 1.4;
+}
+
+/* ─── 3. Right Column: Category Rail + Dedicated Views ─── */
+.app-sidebar {
+  width: 480px;
+  min-width: 440px;
+  max-width: 520px;
+  background: var(--surface-0);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: row;
+  height: 100%;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.sidebar-rail {
+  width: 56px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 6px;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+}
+
+.sidebar-rail-btn {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 2px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--dim);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.sidebar-rail-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.sidebar-rail-btn span {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+.sidebar-rail-btn:hover {
+  color: var(--text);
+  background: var(--surface-1);
+}
+
+.sidebar-rail-btn.is-active {
+  color: var(--accent);
+  background: var(--accent-dim);
+  border-color: var(--accent-border);
+}
+
+.sidebar-rail-btn.is-live::after {
+  content: '';
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent-glow);
+}
+
+.sidebar-rail-btn[data-view="io"].is-live::after {
+  background: var(--danger);
+  box-shadow: 0 0 6px var(--danger);
+}
+
+.sidebar-stage {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  overflow: hidden;
+}
+
+.sidebar-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  min-height: 28px;
+}
+
+.status-chip {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 5px 8px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.status-chip.is-live {
+  color: var(--accent);
+  border-color: var(--accent-border);
+  background: var(--accent-dim);
+}
+
+.status-chip.record-status {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+}
+
+.status-chip.record-status.active {
+  color: var(--danger);
+  border-color: var(--danger-border);
+  background: var(--danger-bg);
+}
+
+.sidebar-views {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-view {
+  display: none;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.sidebar-view.is-active {
+  display: flex;
+}
+
+.sidebar-view[hidden] {
+  display: none !important;
+}
+
+.sidebar-view > .sidebar-rack {
+  flex: 1;
+  min-height: 0;
+}
+
+.rack-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ─── 3a. Sidebar Rack Section Container ─── */
+.sidebar-rack {
+  background: var(--surface-1);
+  border-radius: 3px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-top: 2px solid var(--accent);
+  position: relative;
+}
+
+.rack-header {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  line-height: 1;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.rack-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rack-title::before {
+  content: '—';
+  color: var(--accent);
+  font-family: 'DM Mono', monospace;
+}
+
+.rack-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* ─── 3b. Rack Grid Layouts ─── */
+.param-grid-6col {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+  width: 100%;
+}
+
+.param-grid-2col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+
+.param-grid-3col {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+
+.sidebar-row-2col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.sidebar-row-2col .sidebar-rack {
+  display: flex;
+  flex-direction: column;
+}
+
+.pad-matrix-body {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  flex: 1;
+  min-height: 0;
+}
+
+.sidebar-view[data-view="pads"] .pad-grid {
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  max-width: 280px;
+  margin: 12px auto 0;
+}
+
+.sidebar-view[data-view="pads"] .pad svg {
+  width: 28px;
+  height: 28px;
+}
+
+.sidebar-view[data-view="fx"] .param-grid-6col {
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px 10px;
+  padding: 12px 4px;
+  flex: 1;
+  align-content: center;
+}
+
+.sidebar-view[data-view="fx"] .sidebar-rack {
+  border-top-color: var(--color-effects);
+}
+
+.sidebar-view[data-view="seq"] .marker-rack-body {
+  max-width: 360px;
+  width: 100%;
+  margin: 0 auto;
+  gap: 10px;
+  padding: 8px 0 12px;
+}
+
+.sidebar-view[data-view="seq"] .sidebar-rack {
+  border-top-color: var(--color-motion);
+}
+
+.sidebar-view[data-view="io"] .rack-io {
+  gap: 14px;
+  justify-content: flex-start;
+}
+
+.sidebar-view[data-view="io"] .utility-section {
+  padding: 4px 0 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.sidebar-view[data-view="io"] .utility-section:last-child {
+  border-bottom: none;
+}
+
+.sidebar-view[data-view="io"] .rack-action-btn {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.sidebar-view[data-view="motion"] .sidebar-rack {
+  border-top-color: var(--color-motion);
+}
+
+/* ─── 3c. Marker Sequencer Rack ─── */
+.rack-marker-full {
+  display: flex;
+  flex-direction: column;
+}
+
+.marker-rack-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 0;
+}
+
+.rack-marker-full .knob::before {
+  background: conic-gradient(
+    from 225deg,
+    var(--color-motion) 0deg,
+    var(--color-motion) calc(var(--knob-percent, 0) * 270deg),
+    var(--surface-3) calc(var(--knob-percent, 0) * 270deg),
+    var(--surface-3) 270deg,
+    transparent 270deg
+  );
+}
+
+.rack-marker-full .knob-plus {
+  background: var(--color-motion);
+}
+
+.knob-icon {
+  position: absolute;
+  z-index: 6;
+  pointer-events: none;
+}
+
+.knob-icon-play {
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 6px 0 6px 10px;
+  border-color: transparent transparent transparent var(--text);
+}
+
+.knob-icon-stop {
+  display: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+.knob-btn.active {
+  border-color: var(--accent);
+}
+
+.knob-btn.active .knob-icon-play {
+  display: none;
+}
+
+.knob-btn.active .knob-icon-stop {
+  display: block;
+}
+
+.rack-marker-full .param-tile.is-disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* ─── 3d. Motion Path Studio Rack ─── */
+.rack-motion-full {
+  display: flex;
+  flex-direction: column;
+}
+
+.motion-full-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 12px;
+  padding: 8px 0 4px;
+  flex: 1;
+  min-height: 0;
+}
+
+.motion-canvas-wrap-large {
+  position: relative;
+  width: 100%;
+  flex: 1;
+  min-height: 220px;
+  max-height: 360px;
+  aspect-ratio: 1;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--surface-0);
+  border: 1px solid var(--border);
+}
+
+.motion-canvas-wrap-large canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: crosshair;
+}
+
+#motionCursor {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  display: none;
+  z-index: 10;
+}
+
+.motion-controls-vertical {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* ─── 3e. Utility Vertical Sections ─── */
+.rack-utility-vertical,
+.rack-io {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.utility-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.utility-section .rack-header {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.record-status {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  text-align: center;
+  margin-top: 0;
+  padding: 5px 8px;
+  color: var(--dim);
+  border-radius: 2px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+}
+
+/* ─── 3e. Sidebar Bottom Value Display Box ─── */
+.grid-item-value-display {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--surface-1);
+  color: var(--accent);
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  font-family: 'DM Mono', monospace;
+  min-height: 36px;
+  margin-top: auto;
+}
+
+.value-display-label {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.value-display-separator {
+  opacity: 0.4;
+  color: var(--dim);
+}
+
+.value-display-value {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.grid-item-value-display[data-category="granular"] .value-display-value { color: var(--color-granular); }
+.grid-item-value-display[data-category="effects"] .value-display-value { color: var(--color-effects); }
+.grid-item-value-display[data-category="motion"] .value-display-value { color: var(--color-motion); }
+.grid-item-value-display[data-category="file"] .value-display-value { color: var(--color-file); }
+.grid-item-value-display[data-category="recording"] .value-display-value { color: var(--color-recording); }
+.grid-item-value-display[data-category="midi"] .value-display-value { color: var(--color-midi); }
+.grid-item-value-display[data-category="control"] .value-display-value { color: var(--color-control); }
+
+/* ─── 4. Param Tiles Structure ─── */
+.param-tile {
+  padding: 5px 4px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+  background: var(--surface-2);
+  transition: border-color 0.12s ease;
+  gap: 3px;
+}
+
+.param-tile:hover {
+  border-color: var(--accent);
+}
+
+.tile-header {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  color: var(--muted);
+  text-transform: uppercase;
+  text-align: center;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+
+.tile-value {
+  display: block;
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text);
+  text-align: center;
+  line-height: 1;
+}
+
+/* ─── 5. Responsive Breakpoint ─── */
+@media (max-width: 1100px) {
+  .app-sidebar {
+    width: 420px;
+    min-width: 380px;
+  }
+  .sidebar-rail {
+    width: 50px;
+  }
+}

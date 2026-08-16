@@ -28,11 +28,13 @@ const PARAM_ICONS: Record<string, string> = {
 	filterQ: '◐'
 };
 
-// Icon for pads
+// Icon for pads and none
 const PAD_ICON = '▦';
+const NONE_ICON = '∅';
 
 export function createCustomSelect(config: CustomSelectConfig) {
-	const { element, options, value, onChange } = config;
+	const { element, value, onChange } = config;
+	let currentOptions = config.options;
 	
 	// Clear existing content but preserve existing classes
 	const existingClasses = element.className.split(' ').filter(c => c && c !== 'custom-select');
@@ -51,49 +53,57 @@ export function createCustomSelect(config: CustomSelectConfig) {
 	dropdown.className = 'custom-select-dropdown';
 	dropdown.setAttribute('role', 'listbox');
 	
-	// Find current option
-	const currentOption = options.find(opt => opt.value === value) || options[0];
-	
+	function getIcon(optValue: string, customIcon?: string): string {
+		if (customIcon) return customIcon;
+		if (optValue === 'none' || optValue === '') return NONE_ICON;
+		if (optValue.startsWith('pad:')) return PAD_ICON;
+		return PARAM_ICONS[optValue] || '○';
+	}
+
 	function updateButton() {
-		const selected = options.find(opt => opt.value === button.dataset.value) || options[0];
-		const icon = selected.icon || (selected.value.startsWith('pad:') ? PAD_ICON : PARAM_ICONS[selected.value] || '○');
+		const selected = currentOptions.find(opt => opt.value === button.dataset.value) || currentOptions[0];
+		if (!selected) return;
+		const icon = getIcon(selected.value, selected.icon);
 		button.innerHTML = `<span class="custom-select-icon">${icon}</span><span class="custom-select-label">${selected.label}</span><span class="custom-select-arrow">▼</span>`;
 		button.dataset.value = selected.value;
 		button.setAttribute('aria-label', selected.label);
 	}
 	
-	// Populate dropdown
-	options.forEach(option => {
-		const item = document.createElement('div');
-		item.className = 'custom-select-option';
-		item.setAttribute('role', 'option');
-		item.dataset.value = option.value;
-		const icon = option.icon || (option.value.startsWith('pad:') ? PAD_ICON : PARAM_ICONS[option.value] || '○');
-		item.innerHTML = `<span class="custom-select-icon">${icon}</span><span class="custom-select-label">${option.label}</span>`;
-		
-		if (option.value === value) {
-			item.classList.add('selected');
-			item.setAttribute('aria-selected', 'true');
-		}
-		
-		item.addEventListener('click', () => {
-			const newValue = option.value;
-			button.dataset.value = newValue;
-			updateButton();
-			closeDropdown();
-			onChange(newValue);
+	function renderOptions() {
+		dropdown.innerHTML = '';
+		const currentValue = button.dataset.value;
+		currentOptions.forEach(option => {
+			const item = document.createElement('div');
+			item.className = 'custom-select-option';
+			item.setAttribute('role', 'option');
+			item.dataset.value = option.value;
+			const icon = getIcon(option.value, option.icon);
+			item.innerHTML = `<span class="custom-select-icon">${icon}</span><span class="custom-select-label">${option.label}</span>`;
 			
-			// Update selected state
-			dropdown.querySelectorAll('.custom-select-option').forEach(opt => {
-				opt.classList.remove('selected');
-				opt.removeAttribute('aria-selected');
+			if (option.value === currentValue) {
+				item.classList.add('selected');
+				item.setAttribute('aria-selected', 'true');
+			}
+			
+			item.addEventListener('click', () => {
+				const newValue = option.value;
+				button.dataset.value = newValue;
+				updateButton();
+				closeDropdown();
+				onChange(newValue);
+				
+				dropdown.querySelectorAll('.custom-select-option').forEach(opt => {
+					opt.classList.remove('selected');
+					opt.removeAttribute('aria-selected');
+				});
+				item.classList.add('selected');
+				item.setAttribute('aria-selected', 'true');
 			});
-			item.classList.add('selected');
-			item.setAttribute('aria-selected', 'true');
+			
+			(item as HTMLElement).setAttribute('tabindex', '0');
+			dropdown.appendChild(item);
 		});
-		
-		dropdown.appendChild(item);
-	});
+	}
 	
 	function openDropdown() {
 		button.classList.add('active');
@@ -136,7 +146,15 @@ export function createCustomSelect(config: CustomSelectConfig) {
 	
 	// Close on outside click
 	document.addEventListener('click', (e) => {
-		if (!element.contains(e.target as Node)) {
+		const target = e.target as Node;
+		if (!element.contains(target) && !dropdown.contains(target)) {
+			closeDropdown();
+		}
+	});
+
+	// Close on window resize or scroll
+	window.addEventListener('resize', () => {
+		if (button.classList.contains('active')) {
 			closeDropdown();
 		}
 	});
@@ -178,15 +196,11 @@ export function createCustomSelect(config: CustomSelectConfig) {
 	
 	// Set initial value
 	button.dataset.value = value;
+	renderOptions();
 	updateButton();
 	
 	element.appendChild(button);
-	element.appendChild(dropdown);
-	
-	// Make options focusable
-	dropdown.querySelectorAll('.custom-select-option').forEach(item => {
-		(item as HTMLElement).setAttribute('tabindex', '0');
-	});
+	document.body.appendChild(dropdown);
 	
 	return {
 		setValue: (newValue: string) => {
@@ -205,45 +219,26 @@ export function createCustomSelect(config: CustomSelectConfig) {
 		},
 		getValue: () => button.dataset.value || '',
 		setOptions: (newOptions: SelectOption[]) => {
-			dropdown.innerHTML = '';
+			currentOptions = newOptions;
 			const currentValue = button.dataset.value;
-			const currentOption = newOptions.find(opt => opt.value === currentValue);
+			const currentOption = currentOptions.find(opt => opt.value === currentValue);
+			renderOptions();
 			
-			newOptions.forEach(option => {
-				const item = document.createElement('div');
-				item.className = 'custom-select-option';
-				item.setAttribute('role', 'option');
-				item.dataset.value = option.value;
-				const icon = option.icon || (option.value.startsWith('pad:') ? PAD_ICON : PARAM_ICONS[option.value] || '○');
-				item.innerHTML = `<span class="custom-select-icon">${icon}</span><span class="custom-select-label">${option.label}</span>`;
-				
-				if (option.value === currentValue) {
-					item.classList.add('selected');
-					item.setAttribute('aria-selected', 'true');
-				}
-				
-				item.addEventListener('click', () => {
-					const newValue = option.value;
-					button.dataset.value = newValue;
-					updateButton();
-					closeDropdown();
-					onChange(newValue);
-					
-					dropdown.querySelectorAll('.custom-select-option').forEach(opt => {
-						opt.classList.remove('selected');
-						opt.removeAttribute('aria-selected');
-					});
-					item.classList.add('selected');
-					item.setAttribute('aria-selected', 'true');
-				});
-				
-				(item as HTMLElement).setAttribute('tabindex', '0');
-				dropdown.appendChild(item);
-			});
-			
-			// Update button if current value is not in new options, or if it is, ensure it's displayed correctly
 			if (currentOption) {
 				updateButton();
+			} else if (currentOptions.length > 0) {
+				const fallbackVal = currentOptions.find(opt => opt.value === 'none')?.value || currentOptions[0].value;
+				button.dataset.value = fallbackVal;
+				updateButton();
+			}
+		},
+		open: openDropdown,
+		close: closeDropdown,
+		toggle: () => {
+			if (button.classList.contains('active')) {
+				closeDropdown();
+			} else {
+				openDropdown();
 			}
 		}
 	};
