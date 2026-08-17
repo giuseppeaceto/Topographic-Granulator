@@ -6,25 +6,29 @@ node_modules/
 # Testing
 /coverage
 
-# Production
+# App / packager output (electron-builder resources live in build/)
 /dist
-/build
 /release
+/out
+build/icons/
 
-# Misc
+# Rust
+granular-core/target/
+
+# OS / env
 .DS_Store
+.env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
 
+# Logs / patches
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-
-# Electron
-/out
 *.log
+*.rej
 
 # IDE
 .vscode/
@@ -32,4 +36,3 @@ yarn-error.log*
 *.swp
 *.swo
 *~
-
