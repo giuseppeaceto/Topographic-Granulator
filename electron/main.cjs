@@ -29,7 +29,8 @@ function createWindow() {
       // Note: Security warnings in dev mode are expected and won't appear in production
     },
     icon: path.join(__dirname, '../public/icons/icon.png'),
-    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    title: 'Undergrain',
+    titleBarStyle: 'default',
     show: false, // Don't show until ready
   });
 
@@ -81,6 +82,11 @@ function createWindow() {
     // In production, load from built files
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }
+
+  mainWindow.on('page-title-updated', (event) => {
+    event.preventDefault();
+    mainWindow.setTitle('Undergrain');
+  });
   
   // Handle navigation errors
   mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {

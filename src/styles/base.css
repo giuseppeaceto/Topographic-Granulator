@@ -130,20 +130,9 @@ body.empty-state .empty-state-overlay {
   border-bottom: 1px solid var(--border);
 }
 
-/* ─── Window drag bar (Electron) ─── */
+/* Native title bar handles window drag; this overlay would steal header clicks. */
 .window-drag-bar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 32px;
-  z-index: 100;
-  -webkit-app-region: drag;
-  background: transparent;
-}
-
-.window-drag-bar button, .window-drag-bar input {
-  -webkit-app-region: no-drag;
+  display: none;
 }
 
 .app-footer { border-top: 1px solid var(--border); border-bottom: none; }
