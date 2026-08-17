@@ -131,7 +131,6 @@ const knobConfigs: KnobConfig[] = [
 			const p: any = { pitchSemitones: snapped };
 			updateActiveVoiceGranular(p);
 			if (ctx.state.activePadIndex != null) ctx.state.padParams.setGranular(ctx.state.activePadIndex, p);
-			ctx.controls!.setGranularUI(p);
 		},
 		format: (v) => String(quantizePitch(Math.round(v), ctx.state.activeScaleIndex))
 	},
@@ -145,7 +144,6 @@ const knobConfigs: KnobConfig[] = [
 				ctx.state.padParams.setGranular(ctx.state.activePadIndex, p);
 				ctx.host.syncMarkerEngine(ctx.state.activePadIndex);
 			}
-			ctx.controls!.setGranularUI(p);
 			ctx.xy.setDensity?.(p.density, 0);
 		},
 		format: (v) => String(Math.round(v))
@@ -157,7 +155,6 @@ const knobConfigs: KnobConfig[] = [
 			const p: any = { grainSizeMs: Math.round(v) };
 			updateActiveVoiceGranular(p);
 			if (ctx.state.activePadIndex != null) ctx.state.padParams.setGranular(ctx.state.activePadIndex, p);
-			ctx.controls!.setGranularUI(p);
 		},
 		format: (v) => String(Math.round(v))
 	},
@@ -168,7 +165,6 @@ const knobConfigs: KnobConfig[] = [
 			const p: any = { randomStartMs: Math.round(v) };
 			updateActiveVoiceGranular(p);
 			if (ctx.state.activePadIndex != null) ctx.state.padParams.setGranular(ctx.state.activePadIndex, p);
-			ctx.controls!.setGranularUI(p);
 		},
 		format: (v) => String(Math.round(v))
 	},
@@ -203,7 +199,6 @@ const knobConfigs: KnobConfig[] = [
 			const fx: any = { filterCutoffHz: Math.max(200, Math.round(v)) };
 			ctx.host.applyFxToEngine(fx);
 			if (ctx.state.activePadIndex != null) ctx.state.padParams.setEffects(ctx.state.activePadIndex, fx);
-			ctx.controls!.setFxUI(fx);
 			// Aggiorna il colore ciano quando cambia il filtro cutoff (peso 0 perché non viene da XYPad)
 			ctx.xy.setFilterCutoff?.(fx.filterCutoffHz, 0);
 		},
@@ -235,7 +230,6 @@ const knobConfigs: KnobConfig[] = [
 			}
 			ctx.host.applyFxToEngine(fx);
 			if (ctx.state.activePadIndex != null) ctx.state.padParams.setEffects(ctx.state.activePadIndex, fx);
-			ctx.controls!.setFxUI(fx);
 		},
 		format: (v) => {
 			if (ctx.state.activePadIndex != null && ctx.state.padParams.get(ctx.state.activePadIndex).effects.delaySync) {
@@ -251,7 +245,6 @@ const knobConfigs: KnobConfig[] = [
 			const fx: any = { delayMix: Math.max(0, Math.min(1, v)) };
 			ctx.host.applyFxToEngine(fx);
 			if (ctx.state.activePadIndex != null) ctx.state.padParams.setEffects(ctx.state.activePadIndex, fx);
-			ctx.controls!.setFxUI(fx);
 		},
 		format: (v) => (Math.round(v * 100) / 100).toFixed(2)
 	},
@@ -262,7 +255,6 @@ const knobConfigs: KnobConfig[] = [
 			const fx: any = { reverbMix: Math.max(0, Math.min(1, v)) };
 			ctx.host.applyFxToEngine(fx);
 			if (ctx.state.activePadIndex != null) ctx.state.padParams.setEffects(ctx.state.activePadIndex, fx);
-			ctx.controls!.setFxUI(fx);
 			// Aggiorna il numero di simboli nell'XYPad in base al riverbero
 			ctx.xy.setReverbMix?.(v);
 		},
@@ -275,7 +267,6 @@ const knobConfigs: KnobConfig[] = [
 			const fx: any = { masterGain: Math.max(0, Math.min(1.5, v)) };
 			ctx.host.applyFxToEngine(fx);
 			if (ctx.state.activePadIndex != null) ctx.state.padParams.setEffects(ctx.state.activePadIndex, fx);
-			ctx.controls!.setFxUI(fx);
 		},
 		format: (v) => (Math.round(v * 100) / 100).toFixed(2)
 	},

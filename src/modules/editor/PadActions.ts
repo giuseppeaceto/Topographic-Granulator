@@ -198,8 +198,6 @@ export function createPadActions(
 		ctx.state.padParams.setEffects(index, effects);
 		ctx.state.voiceManager?.updateVoiceBaseParams(index, granular, effects);
 		if (ctx.state.activePadIndex === index) {
-			ctx.controls!.setGranularUI(granular);
-			ctx.controls!.setFxUI(effects);
 			ctx.tiles?.refreshFromState();
 			ctx.fxVisualizer?.setParams(effects);
 		}

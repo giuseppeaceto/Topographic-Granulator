@@ -9,7 +9,6 @@ import type { EffectsChain, EffectsParams } from '../effects/EffectsChain';
 import type { GranularParams } from '../granular/GranularWorkletEngine';
 import type { MidiManager, MidiMapping } from '../midi/MidiManager';
 import type { MidiPlayMode } from '../session/SessionStore';
-import type { setupControls } from '../ui/Controls';
 import type { createCustomSelect } from '../ui/CustomSelect';
 import type { createFxVisualizer } from '../ui/FxVisualizer';
 import type { createMotionPanel } from '../ui/MotionPanel';
@@ -171,7 +170,6 @@ export type AppContext = {
 	themeManager: ReturnType<typeof createThemeManager>;
 	themeToggleBtn: HTMLButtonElement | null;
 	host: AppHost;
-	controls: ReturnType<typeof setupControls> | null;
 	motionCtrl: ReturnType<typeof createMotionPanel> | null;
 	customSelectTL: ReturnType<typeof createCustomSelect> | null;
 	customSelectTR: ReturnType<typeof createCustomSelect> | null;
@@ -203,7 +201,6 @@ export function createAppContext(
 	return {
 		...init,
 		host: {} as AppHost,
-		controls: null,
 		motionCtrl: null,
 		customSelectTL: null,
 		customSelectTR: null,

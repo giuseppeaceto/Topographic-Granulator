@@ -6,7 +6,6 @@ import { createEffectsChain, type EffectsChain } from './modules/effects/Effects
 import { createGranularWorkletEngine, type GranularWorkletEngine } from './modules/granular/GranularWorkletEngine';
 import { VoiceManager } from './modules/audio/VoiceManager';
 import { createPadGrid } from './modules/ui/PadGrid';
-import { setupControls } from './modules/ui/Controls';
 import { createWaveformView } from './modules/ui/WaveformView';
 import { createXYPadThree } from './modules/ui/XYPadThree';
 import { createMotionPanel } from './modules/ui/MotionPanel';
@@ -1511,10 +1510,8 @@ function updateVisualsFromXY(x: number, y: number) {
         granularUpdate.pitchSemitones = quantizePitch(granularUpdate.pitchSemitones, state.activeScaleIndex);
     }
     
-    // 4. Update Knobs UI
-    controls.setGranularUI(granularUpdate);
-    controls.setFxUI(fxUpdate);
-    refreshParamTilesFromValues(granularUpdate, fxUpdate, selectionPosUpdate); // Updates the knobs rotation with interpolated values
+    // 4. Update knobs UI
+    refreshParamTilesFromValues(granularUpdate, fxUpdate, selectionPosUpdate);
     
     // 5. Update XY Pad Visuals (Density, Color, Reverb)
     // We need to know "influence" for specific parameters for visual cues
@@ -1546,24 +1543,6 @@ function updateVisualsFromXY(x: number, y: number) {
 }
 
 startVisualizationLoop();
-
-const controls = setupControls({
-	onParams: (params) => {
-		ensureEngine();
-		// persist to active pad
-		if (state.activePadIndex != null) {
-			state.padParams.setGranular(state.activePadIndex, params as GranularParams);
-            // Update active voice
-            const voice = state.voiceManager?.getActiveVoiceForPad(state.activePadIndex);
-            if (voice) voice.engine.setParams(params);
-		}
-	},
-	onFX: (fx) => {
-		ensureEngine();
-		applyFxToEngine(fx as EffectsParams);
-	}
-});
-ctx.controls = controls;
 
 // Initial render
 updatePadGrid();
@@ -1632,9 +1611,6 @@ updatePadGrid();
 				waveform.setSelection(safeRegion.start, safeRegion.end);
 			}
 			updateSelPosUI();
-			
-			controls.setGranularUI(target.granular);
-			controls.setFxUI(target.effects);
 			refreshParamTilesFromState();
 			
 			// Restore XY position for this pad
@@ -1676,9 +1652,6 @@ updatePadGrid();
 		const toFx = target.effects;
 		const toXY = targetXY;
 		
-		// ensure UI reflects start
-		controls.setGranularUI(fromG);
-		controls.setFxUI(fromFx);
 		if (xy.setPositionSilent) xy.setPositionSilent(fromXY.x, fromXY.y);
 		
 		// Initialize visual state to "from" values immediately to prevent flash of target state
@@ -1745,9 +1718,6 @@ updatePadGrid();
 			const densityWeight = calculateParamWeight('density', interpXY);
 			xy.setDensity?.(interpG.density, densityWeight);
 			
-			// UI
-			controls.setGranularUI(interpG);
-			controls.setFxUI(interpFx);
 			refreshParamTilesFromState();
 			fxVisualizer?.setParams(interpFx);
 			if (step >= steps) {
