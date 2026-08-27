@@ -3,8 +3,85 @@ import type { EffectsParams } from '../effects/EffectsChain';
 import type { GranularParams } from '../granular/GranularWorkletEngine';
 import { quantizePitch } from '../utils/ScaleQuantizer';
 import { markerDriftHz, markerDriftMs, markerHold, setMarkerDrift, setMarkerHold } from '../editor/MarkerStore';
+import { logger } from '../utils/logger';
+import {
+	clampGrainSizeMs,
+	clampRandomStartMs,
+	durationKnobFromNorm,
+	durationKnobToNorm,
+	formatDurationMs,
+	GRAIN_SIZE_CLASSIC_MAX_MS,
+	GRAIN_SIZE_MIN_MS,
+	grainSizeMaxMs,
+	RANDOM_START_MIN_MS,
+	randomStartMaxMs
+} from '../utils/grainLimits';
 
 export function createParamTiles(ctx: AppContext): ParamTiles {
+function isMidiMetaKnob(id: string) {
+	return id === 'midi-learn' || id === 'midi-keys';
+}
+
+function requestMidiAccess(onFail: () => void) {
+	void ctx.host.initMIDI().then((ok) => {
+		if (ok) return;
+		onFail();
+		ctx.tiles?.refreshFromState();
+		logger.warn('Web MIDI not available or permission not granted.');
+		alert('MIDI access was blocked. Restart the app, then click LEARN or KEYS again and allow MIDI if asked. Plug the controller in before opening Undergrain.');
+	});
+}
+
+function activeDurationLimits() {
+	const idx = ctx.state.activePadIndex ?? 0;
+	const region = ctx.state.regions.get(idx);
+	const duration = ctx.host.activeAudioBuffer()?.duration ?? ctx.state.buffer?.duration ?? null;
+	return { region, duration };
+}
+
+function knobMin(cfg: KnobConfig) {
+	return cfg.getMin?.() ?? cfg.min;
+}
+
+function knobMax(cfg: KnobConfig) {
+	return cfg.getMax?.() ?? cfg.max;
+}
+
+function knobToNorm(cfg: KnobConfig, value: number) {
+	const min = knobMin(cfg);
+	const max = knobMax(cfg);
+	if (max <= min) return 0;
+	if (cfg.toNorm) return Math.max(0, Math.min(1, cfg.toNorm(value, min, max)));
+	return Math.max(0, Math.min(1, (value - min) / (max - min)));
+}
+
+function knobFromNorm(cfg: KnobConfig, norm: number) {
+	const min = knobMin(cfg);
+	const max = knobMax(cfg);
+	const n = Math.max(0, Math.min(1, norm));
+	if (cfg.fromNorm) return cfg.fromNorm(n, min, max);
+	return min + n * (max - min);
+}
+
+function syncDurationKnobTooltips() {
+	const { region, duration } = activeDurationLimits();
+	const maxMs = grainSizeMaxMs(region, duration);
+	const grainKnob = document.querySelector('.knob[data-knob="grain"]') as HTMLElement | null;
+	if (grainKnob) {
+		grainKnob.setAttribute(
+			'data-tooltip',
+			`Grain size from 10ms up to the selection length (${formatDurationMs(maxMs)}). Long grains approach a loop.`
+		);
+	}
+	const randKnob = document.querySelector('.knob[data-knob="rand"]') as HTMLElement | null;
+	if (randKnob) {
+		randKnob.setAttribute(
+			'data-tooltip',
+			`Random start offset within the selection (0–${formatDurationMs(maxMs)}).`
+		);
+	}
+}
+
 // Helper to update granular params on active voice
 function updateActiveVoiceGranular(p: Partial<GranularParams>) {
     if (ctx.state.activePadIndex != null) {
@@ -73,16 +150,20 @@ function applyAudioUpdateOnly(cfgId: string, value: number) {
             if (ctx.state.activePadIndex != null) ctx.state.padParams.setGranular(ctx.state.activePadIndex, p2);
             ctx.xy.setDensity?.(p2.density, 0);
             break;
-        case 'grain':
-            const p3: any = { grainSizeMs: Math.round(value) };
+        case 'grain': {
+            const { region, duration } = activeDurationLimits();
+            const p3: any = { grainSizeMs: clampGrainSizeMs(value, region, duration) };
             updateActiveVoiceGranular(p3);
             if (ctx.state.activePadIndex != null) ctx.state.padParams.setGranular(ctx.state.activePadIndex, p3);
             break;
-        case 'rand':
-            const p4: any = { randomStartMs: Math.round(value) };
+        }
+        case 'rand': {
+            const { region, duration } = activeDurationLimits();
+            const p4: any = { randomStartMs: clampRandomStartMs(value, region, duration) };
             updateActiveVoiceGranular(p4);
             if (ctx.state.activePadIndex != null) ctx.state.padParams.setGranular(ctx.state.activePadIndex, p4);
             break;
+        }
         case 'filter':
             const fx1: any = { filterCutoffHz: Math.max(200, Math.round(value)) };
             ctx.host.applyFxToEngine(fx1);
@@ -149,24 +230,48 @@ const knobConfigs: KnobConfig[] = [
 		format: (v) => String(Math.round(v))
 	},
 	{
-		id: 'grain', min: 10, max: 200, step: 1,
-		get: () => (ctx.state.padParams.get(ctx.state.activePadIndex ?? 0).granular.grainSizeMs),
+		id: 'grain', min: GRAIN_SIZE_MIN_MS, max: GRAIN_SIZE_CLASSIC_MAX_MS, step: 1,
+		getMin: () => GRAIN_SIZE_MIN_MS,
+		getMax: () => grainSizeMaxMs(activeDurationLimits().region, activeDurationLimits().duration),
+		toNorm: durationKnobToNorm,
+		fromNorm: durationKnobFromNorm,
+		get: () => {
+			const { region, duration } = activeDurationLimits();
+			return clampGrainSizeMs(
+				ctx.state.padParams.get(ctx.state.activePadIndex ?? 0).granular.grainSizeMs,
+				region,
+				duration
+			);
+		},
 		set: (v) => {
-			const p: any = { grainSizeMs: Math.round(v) };
+			const { region, duration } = activeDurationLimits();
+			const p: any = { grainSizeMs: clampGrainSizeMs(v, region, duration) };
 			updateActiveVoiceGranular(p);
 			if (ctx.state.activePadIndex != null) ctx.state.padParams.setGranular(ctx.state.activePadIndex, p);
 		},
-		format: (v) => String(Math.round(v))
+		format: (v) => formatDurationMs(v)
 	},
 	{
-		id: 'rand', min: 0, max: 200, step: 1,
-		get: () => (ctx.state.padParams.get(ctx.state.activePadIndex ?? 0).granular.randomStartMs),
+		id: 'rand', min: RANDOM_START_MIN_MS, max: GRAIN_SIZE_CLASSIC_MAX_MS, step: 1,
+		getMin: () => RANDOM_START_MIN_MS,
+		getMax: () => randomStartMaxMs(activeDurationLimits().region, activeDurationLimits().duration),
+		toNorm: durationKnobToNorm,
+		fromNorm: durationKnobFromNorm,
+		get: () => {
+			const { region, duration } = activeDurationLimits();
+			return clampRandomStartMs(
+				ctx.state.padParams.get(ctx.state.activePadIndex ?? 0).granular.randomStartMs,
+				region,
+				duration
+			);
+		},
 		set: (v) => {
-			const p: any = { randomStartMs: Math.round(v) };
+			const { region, duration } = activeDurationLimits();
+			const p: any = { randomStartMs: clampRandomStartMs(v, region, duration) };
 			updateActiveVoiceGranular(p);
 			if (ctx.state.activePadIndex != null) ctx.state.padParams.setGranular(ctx.state.activePadIndex, p);
 		},
-		format: (v) => String(Math.round(v))
+		format: (v) => formatDurationMs(v)
 	},
 	{
 		id: 'selpos', min: 0, max: 1, step: 0.01,
@@ -400,9 +505,39 @@ const knobConfigs: KnobConfig[] = [
 		get: () => ctx.state.recallPerPad ? 1 : 0,
 		set: (v) => {
 			ctx.state.recallPerPad = v >= 0.5;
+			ctx.host.markSessionDirty();
+		},
+		format: (v) => v >= 0.5 ? 'ON' : 'OFF'
+	},
+	{
+		id: 'midi-learn', min: 0, max: 1, step: 1,
+		get: () => ctx.state.midi.learnEnabled ? 1 : 0,
+		set: (v) => {
+			const enabled = v >= 0.5;
+			ctx.state.midi.learnEnabled = enabled;
+			ctx.state.midi.pendingTarget = null;
+			ctx.host.highlightPending(null);
+			ctx.host.refreshMarkerUI();
+			if (enabled) {
+				requestMidiAccess(() => {
+					ctx.state.midi.learnEnabled = false;
+					ctx.host.refreshMarkerUI();
+				});
+			}
+		},
+		format: (v) => v >= 0.5 ? 'ON' : 'OFF'
+	},
+	{
+		id: 'midi-keys', min: 0, max: 1, step: 1,
+		get: () => ctx.state.midiMode === 'keys' ? 1 : 0,
+		set: (v) => {
 			ctx.state.midiMode = v >= 0.5 ? 'keys' : 'pads';
-			if (ctx.state.midiMode === 'keys' && !ctx.state.midi.manager) void ctx.host.initMIDI();
 			ctx.heldMidiNotes.length = 0;
+			if (ctx.state.midiMode === 'keys') {
+				requestMidiAccess(() => {
+					ctx.state.midiMode = 'pads';
+				});
+			}
 			ctx.host.markSessionDirty();
 		},
 		format: (v) => v >= 0.5 ? 'ON' : 'OFF'
@@ -539,7 +674,7 @@ function initParamTiles() {
 		(knobEl as any).__knobInitialized = true;
 		// MIDI learn target binding
 		(knobEl.closest('.param-tile') as HTMLElement).addEventListener('click', () => {
-			if (ctx.state.midi.learnEnabled) {
+			if (!isMidiMetaKnob(cfg.id) && ctx.state.midi.learnEnabled) {
 				ctx.state.midi.pendingTarget = `knob:${cfg.id}`;
 				ctx.host.highlightPending(ctx.state.midi.pendingTarget);
 			}
@@ -563,13 +698,11 @@ function initParamTiles() {
 			
 			knobEl.addEventListener('click', (e) => {
 				e.stopPropagation();
-				// If MIDI learn is enabled, set this knob as target immediately
-				if (ctx.state.midi.learnEnabled) {
+				if (!isMidiMetaKnob(cfg.id) && ctx.state.midi.learnEnabled) {
 					ctx.state.midi.pendingTarget = `knob:${cfg.id}`;
 					ctx.host.highlightPending(ctx.state.midi.pendingTarget);
 					return;
 				}
-				// Toggle the value
 				current = cfg.get();
 				const newValue = current >= (cfg.max + cfg.min) / 2 ? cfg.min : cfg.max;
 				cfg.set(newValue);
@@ -597,11 +730,7 @@ function initParamTiles() {
 			const onMove = (ev: PointerEvent) => {
 				if (!dragging) return;
 				const dy = startY - ev.clientY; // upward increases value
-				const range = cfg.max - cfg.min;
-				const delta = (dy / 120) * range * 0.1; // sensitivity
-				let next = startVal + delta;
-				if (next < cfg.min) next = cfg.min;
-				if (next > cfg.max) next = cfg.max;
+				const next = knobFromNorm(cfg, knobToNorm(cfg, startVal) + (dy / 1200));
 				current = next;
 				// Update UI immediately for responsive feel
 				valEl.textContent = cfg.format(current);
@@ -628,7 +757,7 @@ let pendingKnobUpdates = new Map<HTMLElement, number>();
 let knobUpdateRaf: number | null = null;
 
 function updateKnobAngle(knobEl: HTMLElement, value: number, cfg: KnobConfig) {
-	const norm = Math.max(0, Math.min(1, (value - cfg.min) / (cfg.max - cfg.min))); // 0..1
+	const norm = knobToNorm(cfg, value); // 0..1
 	const degrees = -135 + norm * 270; // -135deg to +135deg (270 degree sweep)
 	
 	let fill = knobEl.querySelector('.knob-fill') as HTMLElement | null;
@@ -676,6 +805,7 @@ function updateValueDisplay(cfg: KnobConfig, value: number) {
 // Update knobs with explicit values (used when XY pad position changes)
 // If a parameter is not provided, it will be read from state (for knobs not mapped to XY corners)
 function refreshParamTilesFromValues(granular?: Partial<GranularParams>, effects?: Partial<EffectsParams>, selectionPosUpdate?: number) {
+	syncDurationKnobTooltips();
 	// Map granular params to knob IDs
 	const granularMap: Record<string, keyof GranularParams> = {
 		'pitch': 'pitchSemitones',
@@ -704,15 +834,16 @@ function refreshParamTilesFromValues(granular?: Partial<GranularParams>, effects
 		
 		// Use provided value if available, otherwise read from state
 		const value = granular?.[paramKey] != null ? granular[paramKey] : cfg.get();
+		const clamped = Math.max(knobMin(cfg), Math.min(knobMax(cfg), value));
 		
-		valEl.textContent = cfg.format(value);
+		valEl.textContent = cfg.format(clamped);
 		
 		// Update toggle switch state if applicable
 		if (knobEl.classList.contains('toggle-switch-knob')) {
-			const isActive = value >= (cfg.max + cfg.min) / 2;
+			const isActive = clamped >= (cfg.max + cfg.min) / 2;
 			knobEl.classList.toggle('active', isActive);
 		} else {
-			updateKnobAngle(knobEl, value, cfg);
+			updateKnobAngle(knobEl, clamped, cfg);
 		}
 	});
 	
@@ -753,7 +884,22 @@ function refreshParamTilesFromValues(granular?: Partial<GranularParams>, effects
 	}
 }
 
+function refreshDurationKnobs() {
+	syncDurationKnobTooltips();
+	for (const id of ['grain', 'rand']) {
+		const cfg = knobConfigs.find(k => k.id === id);
+		if (!cfg) continue;
+		const knobEl = document.querySelector(`.knob[data-knob="${id}"]`) as HTMLElement | null;
+		const valEl = document.querySelector(`.tile-value[data-val="${id}"]`) as HTMLElement | null;
+		if (!knobEl || !valEl) continue;
+		const v = cfg.get();
+		valEl.textContent = cfg.format(v);
+		updateKnobAngle(knobEl, v, cfg);
+	}
+}
+
 function refreshParamTilesFromState() {
+	syncDurationKnobTooltips();
 	knobConfigs.forEach(cfg => {
 		const knobEl = document.querySelector(`.knob[data-knob="${cfg.id}"]`) as HTMLElement | null;
 		const valEl = document.querySelector(`.tile-value[data-val="${cfg.id}"]`) as HTMLElement | null;
@@ -854,12 +1000,7 @@ function initAllKnobs() {
 			const onMove = (ev: PointerEvent) => {
 				if (!dragging) return;
 				const dy = startY - ev.clientY;
-				const range = cfg.max - cfg.min;
-				const delta = (dy / 120) * range * 0.1;
-				let next = startVal + delta;
-				if (next < cfg.min) next = cfg.min;
-				if (next > cfg.max) next = cfg.max;
-				current = next;
+				current = knobFromNorm(cfg, knobToNorm(cfg, startVal) + (dy / 1200));
 				// Update UI immediately for responsive feel
 				valEl.textContent = cfg.format(current);
 				updateKnobAngle(knobEl, current, cfg);
@@ -889,8 +1030,6 @@ function initButtonKnobs() {
 	// Motion buttons
 	const motionRecordBtn = document.getElementById('motionRecordBtn') as HTMLButtonElement;
 	const motionPlayBtn = document.getElementById('motionPlayBtn') as HTMLButtonElement;
-	const motionClearBtn = document.getElementById('motionClearBtn') as HTMLButtonElement;
-	const midiClearBtn = document.getElementById('midiClear') as HTMLButtonElement;
 	const nudgeLeftBtn = document.getElementById('nudgeLeft') as HTMLButtonElement;
 	const nudgeRightBtn = document.getElementById('nudgeRight') as HTMLButtonElement;
 	const fileLabel = document.querySelector('label[for="fileInput"]') as HTMLElement | null;
@@ -931,18 +1070,6 @@ function initButtonKnobs() {
 		// Periodic sync (in case state changes externally)
 		setInterval(syncPlayButton, 200);
 	}
-	if (motionClearBtn) {
-		motionClearBtn.addEventListener('click', () => {
-			updateButtonFill(motionClearBtn, true);
-			setTimeout(() => updateButtonFill(motionClearBtn, false), 200);
-		});
-	}
-	if (midiClearBtn) {
-		midiClearBtn.addEventListener('click', () => {
-			updateButtonFill(midiClearBtn, true);
-			setTimeout(() => updateButtonFill(midiClearBtn, false), 200);
-		});
-	}
 	if (nudgeLeftBtn) {
 		nudgeLeftBtn.addEventListener('mousedown', () => updateButtonFill(nudgeLeftBtn, true));
 		nudgeLeftBtn.addEventListener('mouseup', () => updateButtonFill(nudgeLeftBtn, false));
@@ -981,6 +1108,7 @@ function initButtonKnobs() {
 		findConfig: (id) => knobConfigs.find(k => k.id === id),
 		refreshFromState: refreshParamTilesFromState,
 		refreshFromValues: refreshParamTilesFromValues,
+		refreshDurationKnobs,
 		updateKnobAngle,
 		updateValueDisplay,
 		init: () => {

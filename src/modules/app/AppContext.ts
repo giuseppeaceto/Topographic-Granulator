@@ -53,6 +53,10 @@ export type KnobConfig = {
 	get: () => number;
 	set: (v: number) => void;
 	format: (v: number) => string;
+	getMin?: () => number;
+	getMax?: () => number;
+	toNorm?: (value: number, min: number, max: number) => number;
+	fromNorm?: (norm: number, min: number, max: number) => number;
 };
 
 export type ParamTiles = {
@@ -60,6 +64,7 @@ export type ParamTiles = {
 	findConfig: (id: string) => KnobConfig | undefined;
 	refreshFromState: () => void;
 	refreshFromValues: (granular?: Partial<GranularParams>, effects?: Partial<EffectsParams>, selectionPosUpdate?: number) => void;
+	refreshDurationKnobs: () => void;
 	updateKnobAngle: (knobEl: HTMLElement, value: number, cfg: KnobConfig) => void;
 	updateValueDisplay: (cfg: KnobConfig, value: number) => void;
 	init: () => void;
@@ -157,6 +162,8 @@ export type AppHost = {
 	initMIDI: () => Promise<boolean>;
 	highlightPending: (target: string | null) => void;
 	markSessionDirty: () => void;
+	playMarkerSlice: (padIndex: number, sliceIndex: number, velocity?: number) => Promise<void>;
+	releaseMarkerSlice: (padIndex: number, sliceIndex: number) => void;
 };
 
 export type AppContext = {

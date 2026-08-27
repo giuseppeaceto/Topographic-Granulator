@@ -435,6 +435,26 @@
   background: var(--accent-dim);
 }
 
+.midi-status-chip {
+  min-width: 3.2em;
+  text-align: center;
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.midi-status-chip.is-on {
+  color: var(--color-midi);
+  border-color: color-mix(in srgb, var(--color-midi) 45%, var(--border));
+}
+
+.midi-status-chip.is-flash {
+  color: var(--color-midi);
+  border-color: var(--color-midi);
+  background: color-mix(in srgb, var(--color-midi) 18%, var(--surface-1));
+}
+
 .status-chip.record-status {
   flex: 1;
   min-width: 0;
@@ -701,7 +721,7 @@
   border-bottom: none;
 }
 
-.sidebar-view[data-view="io"] .rack-action-btn {
+.sidebar-view[data-view="io"] .rack-action-btn:not(.rack-clear-btn) {
   width: 44px;
   height: 44px;
   padding: 0;
@@ -750,6 +770,93 @@
   color: var(--color-motion);
   opacity: 0.8;
   text-align: center;
+}
+
+.marker-slice-keys {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 3px;
+  margin: 0 0 8px;
+  min-height: 28px;
+}
+
+.marker-slice-keys.is-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  border: 1px dashed var(--border-subtle);
+  border-radius: 4px;
+  color: var(--muted);
+  font-family: "DM Mono", monospace;
+  font-size: 8px;
+  letter-spacing: 0.04em;
+}
+
+.marker-slice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  min-height: 32px;
+  padding: 2px 0;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface-2);
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+
+.marker-slice:hover {
+  border-color: var(--color-motion);
+  color: var(--text);
+}
+
+.marker-slice:active,
+.marker-slice.is-held {
+  background: var(--color-motion);
+  color: var(--surface-0);
+  border-color: var(--color-motion);
+}
+
+.marker-slice.is-playing:not(.is-held) {
+  border-color: var(--color-motion);
+  color: var(--color-motion);
+  box-shadow: inset 0 0 0 1px var(--color-motion);
+}
+
+.marker-slice.learn-pending {
+  outline: 1px dashed var(--learn-outline);
+  outline-offset: 1px;
+}
+
+.marker-slice.is-mapped::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--color-midi);
+}
+
+.marker-slice-num {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.marker-slice-key {
+  font-family: "DM Mono", monospace;
+  font-size: 7px;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
 }
 
 .rack-marker-full .knob::before {
@@ -881,6 +988,56 @@
 .utility-section .rack-header {
   border-bottom: none;
   padding-bottom: 0;
+}
+
+.midi-in-monitor {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 108px;
+  margin: 0;
+  padding: 2px 6px 2px 5px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-1);
+  color: var(--muted);
+  font-family: 'DM Mono', monospace;
+  font-size: 7px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.midi-in-monitor.is-on {
+  color: var(--color-midi);
+  border-color: color-mix(in srgb, var(--color-midi) 40%, var(--border));
+}
+
+.midi-in-led {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dim);
+  flex-shrink: 0;
+}
+
+.midi-in-monitor.is-on .midi-in-led {
+  background: var(--color-midi);
+  opacity: 0.4;
+}
+
+.midi-in-led.is-flash {
+  background: var(--color-midi);
+  opacity: 1;
+  box-shadow: 0 0 7px var(--color-midi);
+}
+
+.midi-in-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .record-status {

@@ -1,6 +1,6 @@
 import type { GranularParams } from '../granular/GranularWorkletEngine';
 import type { EffectsParams } from '../effects/EffectsChain';
-import { PARAMS, type ParamId } from '../ui/ParamRegistry';
+import { PARAMS, type ParamId, type ParamRangeOverride } from '../ui/ParamRegistry';
 
 export type InterpolationWeights = {
     tl: number;
@@ -44,7 +44,8 @@ export class ParameterMapper {
     static mapParams(
         weights: InterpolationWeights,
         baseParams: BaseParams,
-        mapping: CornerMapping
+        mapping: CornerMapping,
+        rangeOverrides?: ParamRangeOverride
     ): MappingResult {
         const influenceMap = new Map<ParamId, number>();
         
@@ -80,14 +81,16 @@ export class ParameterMapper {
 
             // Clamp influence to 0..1 just in case
             const safeInfl = Math.max(0, Math.min(1, infl));
+            const min = rangeOverrides?.[paramId]?.min ?? meta.min;
+            const max = rangeOverrides?.[paramId]?.max ?? meta.max;
             
             // Use full range interpolation for maximum effect
             // The bilinear weights already provide smooth transitions
-            const targetVal = meta.max;
+            const targetVal = max;
             const newVal = baseVal + (targetVal - baseVal) * safeInfl;
             
             // Clamp to valid range
-            const clampedVal = Math.max(meta.min, Math.min(meta.max, newVal));
+            const clampedVal = Math.max(min, Math.min(max, newVal));
 
             if (meta.kind === 'granular') {
                 (granularUpdate as any)[meta.id] = clampedVal;
@@ -105,4 +108,3 @@ export class ParameterMapper {
         return result;
     }
 }
-

@@ -131,8 +131,33 @@ export function createFxVisualizer(canvas: HTMLCanvasElement): FxVisualizer {
 	let bufferH = 0;
 	const rain = seedRain();
 
+	function paramsSettled() {
+		return Math.abs(shown.filterCutoffHz - target.filterCutoffHz) < 0.8
+			&& Math.abs((shown.filterQ ?? 0) - (target.filterQ ?? 0)) < 0.01
+			&& Math.abs(shown.delayTimeSec - target.delayTimeSec) < 0.002
+			&& Math.abs(shown.delayMix - target.delayMix) < 0.004
+			&& Math.abs((shown.delayFeedback ?? 0) - (target.delayFeedback ?? 0)) < 0.004
+			&& Math.abs(shown.reverbMix - target.reverbMix) < 0.004
+			&& Math.abs(shown.masterGain - target.masterGain) < 0.004
+			&& Math.abs((shown.reverbRoom ?? 0) - (target.reverbRoom ?? 0)) < 0.004;
+	}
+
+	function hoverSettled() {
+		return Math.abs(hoverTX - hoverX) < 0.0008 && Math.abs(hoverTY - hoverY) < 0.0008;
+	}
+
+	function needsTick() {
+		if (document.hidden) return false;
+		if (!hoverSettled()) return true;
+		if (!paramsSettled()) return true;
+		const qAmt = Math.min(1, Math.max(0, ((target.filterQ ?? 0.707) - 0.5) / 12));
+		if (qAmt > 0.08) return true;
+		return false;
+	}
+
 	function setParams(p: Partial<EffectsParams>) {
 		target = { ...target, ...p };
+		if (needsTick()) start();
 	}
 
 	function resize() {
@@ -224,7 +249,12 @@ export function createFxVisualizer(canvas: HTMLCanvasElement): FxVisualizer {
 		}
 
 		render();
-		raf = requestAnimationFrame(tick);
+		if (needsTick()) {
+			raf = requestAnimationFrame(tick);
+		} else {
+			running = false;
+			raf = 0;
+		}
 	}
 
 	function render() {
@@ -343,10 +373,12 @@ export function createFxVisualizer(canvas: HTMLCanvasElement): FxVisualizer {
 		const rect = canvas.getBoundingClientRect();
 		hoverTX = ((e.clientX - rect.left) / rect.width - 0.5) * 2;
 		hoverTY = ((e.clientY - rect.top) / rect.height - 0.5) * 2;
+		start();
 	});
 	canvas.addEventListener('pointerleave', () => {
 		hoverTX = 0;
 		hoverTY = 0;
+		start();
 	});
 
 	const io = new IntersectionObserver((entries) => {
@@ -357,7 +389,7 @@ export function createFxVisualizer(canvas: HTMLCanvasElement): FxVisualizer {
 	io.observe(canvas);
 
 	const ro = new ResizeObserver(() => {
-		if (running) resize();
+		render();
 	});
 	ro.observe(canvas);
 

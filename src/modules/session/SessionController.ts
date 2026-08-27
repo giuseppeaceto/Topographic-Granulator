@@ -288,10 +288,6 @@ async function applySession(
 	}
 	await remountPadAudioBuffers();
 
-	if (ctx.state.midiMode === 'keys' && !ctx.state.midi.manager) {
-		void ctx.host.initMIDI();
-	}
-
 	ctx.host.updatePadGrid();
 	if (ctx.state.activePadIndex != null) {
 		showBufferForPad(ctx.state.activePadIndex);

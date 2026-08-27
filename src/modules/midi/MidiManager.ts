@@ -1,9 +1,21 @@
+import { logger } from '../utils/logger';
+
 export type MidiMapping = {
 	type: 'cc' | 'note';
 	channel: number;
 	controller: number; // cc number or note number
-	targetId: string;   // e.g., 'knob:pitch' or 'pad:0'
+	targetId: string;   // e.g., 'knob:pitch' or 'pad:0' or 'marker:0:2'
 };
+
+export function parseMarkerTarget(targetId: string): { padIndex: number; sliceIndex: number } | null {
+	const m = /^marker:(\d+):(\d+)$/.exec(targetId);
+	if (!m) return null;
+	return { padIndex: Number(m[1]), sliceIndex: Number(m[2]) };
+}
+
+export function markerTargetId(padIndex: number, sliceIndex: number): string {
+	return `marker:${padIndex}:${sliceIndex}`;
+}
 
 export type MidiEvent =
 	| { type: 'cc' | 'noteon' | 'noteoff'; channel: number; num: number; value: number }
@@ -12,36 +24,78 @@ export type MidiEvent =
 	| { type: 'clockstop' };
 
 export class MidiManager {
-	private access: WebMidi.MIDIAccess | null = null;
-	private inputs: WebMidi.MIDIInput[] = [];
+	private access: MIDIAccess | null = null;
+	private inputs: MIDIInput[] = [];
 	private listeners: ((e: MidiEvent) => void)[] = [];
+	private inputListeners: Array<() => void> = [];
+	private lastStatus = 0;
+	private readonly onMidiMessage = (message: Event) => {
+		this.handleMessage(message as MIDIMessageEvent);
+	};
 
 	async init(): Promise<boolean> {
-		if (!navigator.requestMIDIAccess) return false;
+		if (!navigator.requestMIDIAccess) {
+			logger.warn('Web MIDI API is not available in this runtime.');
+			return false;
+		}
 		try {
 			this.access = await navigator.requestMIDIAccess({ sysex: false });
 			this.refresh();
 			this.access.onstatechange = () => this.refresh();
+			const names = this.getInputNames();
+			logger.log('MIDI ready. Inputs:', names.length ? names.join(', ') : '(none yet)');
 			return true;
-		} catch {
+		} catch (err) {
+			logger.error('MIDI access failed:', err);
 			return false;
 		}
 	}
 
+	getInputNames(): string[] {
+		return this.inputs.map((inp) => inp.name || inp.manufacturer || inp.id).filter(Boolean);
+	}
+
+	onInputsChange(cb: () => void) {
+		this.inputListeners.push(cb);
+	}
+
 	private refresh() {
-		this.inputs.forEach(inp => (inp.onmidimessage = null));
+		this.inputs.forEach((inp) => {
+			inp.onmidimessage = null;
+		});
 		this.inputs = [];
 		if (!this.access) return;
 		for (const inp of this.access.inputs.values()) {
 			this.inputs.push(inp);
-			inp.onmidimessage = (msg) => this.handleMessage(msg);
+			// Chromium Web MIDI reliably delivers via onmidimessage; addEventListener is flaky in Electron.
+			inp.onmidimessage = this.onMidiMessage;
 		}
+		this.inputListeners.forEach((cb) => cb());
 	}
 
-	private handleMessage(message: WebMidi.MIDIMessageEvent) {
-		const data = message.data;
-		if (!data || data.length === 0) return;
-		const status = data[0];
+	private handleMessage(message: MIDIMessageEvent) {
+		const raw = message.data;
+		if (!raw || raw.length === 0) return;
+		const src = raw instanceof Uint8Array
+			? raw
+			: ArrayBuffer.isView(raw)
+				? new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength)
+				: new Uint8Array(raw as ArrayBuffer);
+		let status: number;
+		let data1 = 0;
+		let data2 = 0;
+		if (src[0] < 0x80) {
+			if (this.lastStatus < 0x80) return;
+			status = this.lastStatus;
+			data1 = src[0] ?? 0;
+			data2 = src[1] ?? 0;
+		} else {
+			status = src[0];
+			data1 = src[1] ?? 0;
+			data2 = src[2] ?? 0;
+			if (status < 0xf0) this.lastStatus = status;
+			else if (status < 0xf8) this.lastStatus = 0;
+		}
 		if (status === 0xf8) {
 			this.emit({ type: 'clock' });
 			return;
@@ -54,16 +108,12 @@ export class MidiManager {
 			this.emit({ type: 'clockstop' });
 			return;
 		}
-		const data1 = data[1] ?? 0;
-		const data2 = data[2] ?? 0;
+		if (status >= 0xf0) return;
 		const statusHigh = status & 0xf0;
 		const channel = (status & 0x0f) + 1;
 		if (statusHigh === 0xb0) {
-			// CC
-			const e: MidiEvent = { type: 'cc', channel, num: data1, value: data2 };
-			this.emit(e);
+			this.emit({ type: 'cc', channel, num: data1, value: data2 });
 		} else if (statusHigh === 0x90) {
-			// note on (velocity 0 => off)
 			if (data2 > 0) {
 				this.emit({ type: 'noteon', channel, num: data1, value: data2 });
 			} else {
@@ -99,6 +149,7 @@ export class MidiManager {
 		this.listeners = [];
 		
 		// Remove event handlers from MIDI inputs
+		this.inputListeners = [];
 		this.inputs.forEach(inp => {
 			inp.onmidimessage = null;
 		});

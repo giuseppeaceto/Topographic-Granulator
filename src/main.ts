@@ -11,11 +11,12 @@ import { createXYPadThree } from './modules/ui/XYPadThree';
 import { createMotionPanel } from './modules/ui/MotionPanel';
 import { PARAMS, type ParamId } from './modules/ui/ParamRegistry';
 import { ParameterMapper } from './modules/utils/ParameterMapper';
+import { GRAIN_SIZE_MIN_MS, grainSizeMaxMs, RANDOM_START_MIN_MS, randomStartMaxMs, toEngineGranular } from './modules/utils/grainLimits';
 import { loadMappings } from './modules/midi/MidiManager';
 import { createPadParamStore, defaultEffects, defaultGranular, type PadParams } from './modules/editor/PadParamStore';
-import { defaultMarkerSeq, clearMarkers, isDiscreteGrainMode, shiftMarkersWithRegion, setMarkerHold, setMarkerDrift, markerHold, markerDriftMs, markerDriftHz, type MarkerSeqParams } from './modules/editor/MarkerStore';
+import { defaultMarkerSeq, clearMarkers, isDiscreteGrainMode, shiftMarkersWithRegion, setMarkerHold, setMarkerDrift, markerHold, markerDriftMs, markerDriftHz, markersInRegion, type MarkerSeqParams } from './modules/editor/MarkerStore';
 import { createMarkerSequencer } from './modules/audio/MarkerSequencer';
-import { createMarkerRack } from './modules/ui/MarkerRack';
+import { createMarkerRack, sliceIndexFromCode } from './modules/ui/MarkerRack';
 import { initSidebarNav } from './modules/ui/SidebarNav';
 import type { GranularParams } from './modules/granular/GranularWorkletEngine';
 import type { EffectsParams } from './modules/effects/EffectsChain';
@@ -385,6 +386,7 @@ let isXYMorphing = false;
 let isMarkerPlayback = false;
 let skipNextMarkerShift = false;
 let markersLiveShifted = false;
+let xyBaseSelectionPos: number | null = null; // 0..1 along the movable range at last snapshot
 waveform.onSelection((sel) => {
 	if (sel) {
 		selStartEl.textContent = sel.start.toFixed(2);
@@ -417,11 +419,12 @@ waveform.onSelection((sel) => {
 		if (state.voiceManager && state.buffer && state.activePadIndex != null) {
             const voice = state.voiceManager.getActiveVoiceForPad(state.activePadIndex);
             if (voice) {
-			    voice.engine.setRegion(sel.start, sel.end);
+			    state.voiceManager.setVoiceRegion(state.activePadIndex, { start: sel.start, end: sel.end });
 			    // ensure immediate response while dragging
 			    voice.engine.trigger();
             }
 		}
+		ctx.tiles?.refreshDurationKnobs();
 	} else {
 		selStartEl.textContent = '0.00';
 		selEndEl.textContent = '0.00';
@@ -1195,12 +1198,200 @@ async function triggerPad(index: number) {
         corners,
         padMorphIndices
     );
-    syncMarkerEngine(index);
+	syncMarkerEngine(index);
     updateSidebarStatus();
+}
+
+async function ensurePadPlaying(index: number): Promise<boolean> {
+	await ensureAudioReady();
+	if (!bufferForPad(index) || !state.regions.get(index) || !state.voiceManager) return false;
+	if (state.voiceManager.isPadPlaying(index)) return true;
+	await triggerPad(index);
+	return state.voiceManager.isPadPlaying(index);
+}
+
+const heldMarkerSlices: { padIndex: number; sliceIndex: number }[] = [];
+
+function markerSliceList(padIndex: number) {
+	const { region, markers } = resolveMarkerPlayback(padIndex);
+	return markersInRegion(markers, region);
+}
+
+function fireMarkerSlice(padIndex: number, sliceIndex: number, velocity: number) {
+	if (sliceIndex < 0 || sliceIndex >= 16) return false;
+	const { region, markers, seq } = resolveMarkerPlayback(padIndex);
+	const marker = markersInRegion(markers, region)[sliceIndex];
+	if (!marker || !state.voiceManager) return false;
+	const params = state.padParams.get(padIndex);
+	const vel = Math.max(1, velocity) / 127;
+	if (seq.grainMode !== 'bloom') {
+		state.voiceManager.setVoiceDensity(padIndex, Math.round(8 + vel * 40));
+	}
+	if (markerSequencer.isLaneRunning(padIndex)) {
+		markerSequencer.jumpToMarker(padIndex, marker.id);
+	} else {
+		const ok = markerSequencer.triggerMarker(padIndex, marker.id, {
+			enabled: seq.enabled,
+			playing: true,
+			params: { ...seq, markers },
+			region,
+			density: params?.granular.density ?? 15,
+			duration: bufferForPad(padIndex)?.duration ?? 0
+		});
+		if (!ok) return false;
+		if (padIndex === state.activePadIndex) {
+			waveform.setSelectedMarkerId(marker.id);
+			markerRack?.setHoldEnabled(true);
+		}
+	}
+	return true;
+}
+
+async function playMarkerSlice(padIndex: number, sliceIndex: number, velocity: number = 127) {
+	if (!(await ensurePadPlaying(padIndex))) return;
+	if (!fireMarkerSlice(padIndex, sliceIndex, velocity)) return;
+	heldMarkerSlices.push({ padIndex, sliceIndex });
+	refreshMarkerSliceKeys();
+	updateSidebarStatus();
+}
+
+function releaseMarkerSlice(padIndex: number, sliceIndex: number) {
+	const idx = heldMarkerSlices.findIndex(h => h.padIndex === padIndex && h.sliceIndex === sliceIndex);
+	if (idx < 0) return;
+	heldMarkerSlices.splice(idx, 1);
+	const remaining = [...heldMarkerSlices].reverse().find(h => h.padIndex === padIndex);
+	if (remaining) {
+		if (!markerSequencer.isLaneRunning(padIndex)) {
+			fireMarkerSlice(padIndex, remaining.sliceIndex, 127);
+		}
+	} else if (!markerSequencer.isLaneRunning(padIndex)) {
+		markerSequencer.releaseSustain(padIndex);
+		state.voiceManager?.resetVoiceGrainSource(padIndex);
+		state.voiceManager?.setVoiceDensity(padIndex, null);
+	}
+	refreshMarkerSliceKeys();
+}
+
+function refreshMarkerSliceKeys() {
+	const padIndex = state.activePadIndex ?? 0;
+	const ids = markerSliceList(padIndex).slice(0, 16).map(m => m.id);
+	const pending = parsePendingMarkerSlice(state.midi.pendingTarget, padIndex);
+	const mapped: number[] = [];
+	for (const m of state.midi.mappings) {
+		if (m.type !== 'note') continue;
+		const parts = m.targetId.split(':');
+		if (parts[0] !== 'marker' || Number(parts[1]) !== padIndex) continue;
+		const slice = Number(parts[2]);
+		if (Number.isInteger(slice)) mapped.push(slice);
+	}
+	markerRack?.setSlices({
+		padIndex,
+		ids,
+		held: heldMarkerSlices.filter(h => h.padIndex === padIndex).map(h => h.sliceIndex),
+		pendingSlice: pending,
+		mapped
+	});
+}
+
+function syncMarkerSurvey(visual?: ReturnType<typeof markerSequencer.getLaneVisual>) {
+	if (!xy.setMarkerSurvey) return;
+	const idx = state.activePadIndex;
+	if (idx == null) {
+		xy.setMarkerSurvey(null);
+		return;
+	}
+	const { region } = resolveMarkerPlayback(idx);
+	const list = markerSliceList(idx);
+	if (list.length === 0) {
+		xy.setMarkerSurvey(null);
+		return;
+	}
+	const live = visual ?? (markerSequencer.isLaneActive(idx) ? markerSequencer.getLaneVisual(idx) : null);
+	xy.setMarkerSurvey({
+		region,
+		markers: live?.markers ?? list.map(m => ({
+			id: m.id,
+			timeSec: m.timeSec,
+			liveSec: m.timeSec,
+			driftMs: markerDriftMs(m)
+		})),
+		playingId: live?.playingId ?? waveform.getSelectedMarkerId(),
+		playheadSec: live?.playheadSec ?? null,
+		bloom: live?.bloom ?? 0,
+		running: live?.running ?? false,
+		hitAge: live?.hitAge ?? 10
+	});
+}
+
+function parsePendingMarkerSlice(target: string | null, padIndex: number): number | null {
+	if (!target) return null;
+	const parts = target.split(':');
+	if (parts[0] !== 'marker' || Number(parts[1]) !== padIndex) return null;
+	const slice = Number(parts[2]);
+	return Number.isInteger(slice) ? slice : null;
 }
 
 function getMarkerSeq(index: number): MarkerSeqParams {
 	return state.padParams.get(index)?.markerSeq ?? defaultMarkerSeq();
+}
+
+function currentCornerMapping() {
+	return {
+		tl: customSelectTL?.getValue() || '',
+		tr: customSelectTR?.getValue() || '',
+		bl: customSelectBL?.getValue() || '',
+		br: customSelectBR?.getValue() || ''
+	};
+}
+
+/** Live selection window after XY Position morph — stored region is left unchanged. */
+function liveSelectionForPad(index: number): { start: number; end: number } | null {
+	const stored = state.regions.get(index);
+	if (!stored) return null;
+	if (getXYMode() !== 'params') return { start: stored.start, end: stored.end };
+	const mapping = currentCornerMapping();
+	if (
+		mapping.tl !== 'selectionPos'
+		&& mapping.tr !== 'selectionPos'
+		&& mapping.bl !== 'selectionPos'
+		&& mapping.br !== 'selectionPos'
+	) {
+		return { start: stored.start, end: stored.end };
+	}
+	const buf = bufferForPad(index) ?? state.buffer;
+	const params = state.padParams.get(index);
+	if (!buf || !params) return { start: stored.start, end: stored.end };
+
+	const xyPos = index === state.activePadIndex
+		? xy.getPosition()
+		: (state.voiceManager?.getVoiceCurrentXY(index) ?? params.xy ?? { x: 0.5, y: 0.5 });
+	const width = stored.end - stored.start;
+	const movable = Math.max(0, buf.duration - width);
+	if (movable <= 0) return { start: stored.start, end: stored.end };
+
+	const baseSel = (index === state.activePadIndex && xyBaseSelectionPos != null)
+		? xyBaseSelectionPos
+		: stored.start / movable;
+	const mapped = ParameterMapper.mapParams(
+		ParameterMapper.calculateWeights(xyPos.x, xyPos.y),
+		{ granular: params.granular, effects: params.effects, selectionPos: baseSel },
+		mapping
+	);
+	if (mapped.selectionPos === undefined) return { start: stored.start, end: stored.end };
+
+	const clampedStart = Math.max(0, Math.min(mapped.selectionPos * movable, buf.duration - width));
+	return { start: clampedStart, end: Math.min(buf.duration, clampedStart + width) };
+}
+
+function resolveMarkerPlayback(index: number, liveRegion?: { start: number; end: number } | null) {
+	const seq = getMarkerSeq(index);
+	const stored = state.regions.get(index);
+	const region = liveRegion ?? liveSelectionForPad(index) ?? stored ?? null;
+	const buf = bufferForPad(index);
+	const markers = (region && stored && buf)
+		? shiftMarkersWithRegion(seq.markers, stored, region, buf.duration)
+		: seq.markers;
+	return { region, markers, seq };
 }
 
 function updateSidebarStatus() {
@@ -1235,11 +1426,12 @@ function updateRandTooltip(enabled: boolean) {
 
 function refreshMarkerUI() {
 	const index = state.activePadIndex ?? 0;
-	const seq = getMarkerSeq(index);
-	const region = state.regions.get(index);
-	waveform.setMarkers(seq.markers);
+	const { region, markers, seq } = resolveMarkerPlayback(index);
+	waveform.setMarkers(markers);
 	waveform.setRegionRange(region);
-	markerRack?.sync(seq);
+	markerRack?.sync({ ...seq, markers });
+	refreshMarkerSliceKeys();
+	syncMarkerSurvey();
 	const selectedId = waveform.getSelectedMarkerId();
 	markerRack?.setHoldEnabled(!!selectedId);
 	updateRandTooltip(seq.enabled);
@@ -1262,12 +1454,7 @@ function syncMarkerEngine(index: number, liveRegion?: { start: number; end: numb
 		updateSidebarStatus();
 		return;
 	}
-	const seq = params.markerSeq ?? defaultMarkerSeq();
-	const storedRegion = state.regions.get(index);
-	const region = liveRegion ?? storedRegion;
-	const markers = (liveRegion && storedRegion && bufferForPad(index))
-		? shiftMarkersWithRegion(seq.markers, storedRegion, liveRegion, bufferForPad(index)!.duration)
-		: seq.markers;
+	const { region, markers, seq } = resolveMarkerPlayback(index, liveRegion);
 	markerSequencer.syncLane(index, {
 		enabled: seq.enabled,
 		playing: state.voiceManager?.isPadPlaying(index) ?? false,
@@ -1306,13 +1493,30 @@ let markerRack = createMarkerRack({
 		state.padParams.setMarkerSeq(state.activePadIndex, clearMarkers(getMarkerSeq(state.activePadIndex)));
 		refreshMarkerUI();
 		syncMarkerEngine(state.activePadIndex);
-	}
+	},
+	onSliceDown: (sliceIndex) => {
+		if (state.activePadIndex == null) return;
+		void playMarkerSlice(state.activePadIndex, sliceIndex);
+	},
+	onSliceUp: (sliceIndex) => {
+		if (state.activePadIndex == null) return;
+		releaseMarkerSlice(state.activePadIndex, sliceIndex);
+	},
+	onSliceLearn: (sliceIndex) => {
+		if (state.activePadIndex == null) return;
+		state.midi.pendingTarget = `marker:${state.activePadIndex}:${sliceIndex}`;
+		highlightPending(state.midi.pendingTarget);
+		refreshMarkerSliceKeys();
+	},
+	isLearnEnabled: () => !!state.midi.learnEnabled
 });
 
 waveform.onMarkersChange((markers) => {
 	if (state.activePadIndex == null) return;
 	state.padParams.setMarkerSeq(state.activePadIndex, { markers });
 	syncMarkerEngine(state.activePadIndex);
+	refreshMarkerSliceKeys();
+	syncMarkerSurvey();
 });
 waveform.onGestureStart(() => {
 	pushUndo();
@@ -1354,54 +1558,82 @@ window.addEventListener('keydown', (e) => {
 	}
 });
 
+const computerSliceKeys = new Map<string, { padIndex: number; sliceIndex: number }>();
+function isTypingTarget(el: EventTarget | null) {
+	const target = el as HTMLElement | null;
+	return !!(target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable));
+}
+window.addEventListener('keydown', (e) => {
+	if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+	if (isTypingTarget(e.target)) return;
+	const sliceIndex = sliceIndexFromCode(e.code);
+	if (sliceIndex < 0 || state.activePadIndex == null) return;
+	if (sliceIndex >= markerSliceList(state.activePadIndex).length) return;
+	if (computerSliceKeys.has(e.code)) return;
+	e.preventDefault();
+	computerSliceKeys.set(e.code, { padIndex: state.activePadIndex, sliceIndex });
+	void playMarkerSlice(state.activePadIndex, sliceIndex);
+});
+window.addEventListener('keyup', (e) => {
+	const held = computerSliceKeys.get(e.code);
+	if (!held) return;
+	computerSliceKeys.delete(e.code);
+	releaseMarkerSlice(held.padIndex, held.sliceIndex);
+});
+
 // ---------- VISUALIZATION LOOP ----------
 // Sync UI with Audio Engine state (Active Pad only)
 // Throttled to reduce CPU load when multiple pads are active
 function startVisualizationLoop() {
     let lastUpdate = 0;
     const UI_UPDATE_INTERVAL = 16; // ~60fps for UI (smooth visuals)
-    
+    let lastVizX = NaN;
+    let lastVizY = NaN;
+
     const loop = () => {
         const now = performance.now();
         const shouldUpdate = (now - lastUpdate) >= UI_UPDATE_INTERVAL;
-        
-        if (shouldUpdate && state.voiceManager) {
-            // 1. Update Ghost Cursors (Background Polyphony)
+
+        if (shouldUpdate && !document.hidden && state.voiceManager) {
+            const allPositions = state.voiceManager.getAllVoicePositions();
+            const pos = state.activePadIndex != null
+                ? state.voiceManager.getVoiceCurrentXY(state.activePadIndex)
+                : null;
+            const seqRunning = state.activePadIndex != null
+                && markerSequencer.isLaneActive(state.activePadIndex);
+
+            if (allPositions.length === 0 && !pos && !seqRunning) {
+                xy.setGhostPositions?.([]);
+                lastVizX = NaN;
+                lastVizY = NaN;
+                lastUpdate = now;
+                requestAnimationFrame(loop);
+                return;
+            }
+
             if (xy.setGhostPositions) {
-                const allPositions = state.voiceManager.getAllVoicePositions();
-                // Filter out the active pad from ghosts (it has the main cursor)
                 const ghosts = allPositions.filter(p => p.colorIndex !== state.activePadIndex);
                 xy.setGhostPositions(ghosts);
             }
 
-            // 2. Update Active Pad Cursor & Visuals
-            if (state.activePadIndex != null) {
-                const pos = state.voiceManager.getVoiceCurrentXY(state.activePadIndex);
-                
-                if (pos) {
-                    // Update XY Pad Cursor (Silent update to avoid feedback loop)
-                    // Only if user is NOT dragging (Manual Override handles its own UI update)
-                    if (!xyUserDragging && xy.setPositionSilent) {
-                        xy.setPositionSilent(pos.x, pos.y);
-                    }
-
-                    // Update Motion Panel Cursor
-                    if (motionCtrl) {
-                        motionCtrl.setCursor(pos.x, pos.y);
-                    }
-                    
-                    // Update Param Knobs / Visuals based on current position
-                    // Throttle visual updates to reduce DOM manipulation overhead
-                    if (!xyUserDragging) {
-                         updateVisualsFromXY(pos.x, pos.y);
-                    }
+            if (pos) {
+                if (!xyUserDragging && xy.setPositionSilent) {
+                    xy.setPositionSilent(pos.x, pos.y);
+                }
+                if (motionCtrl) {
+                    motionCtrl.setCursor(pos.x, pos.y);
+                }
+                if (!xyUserDragging && (Math.abs(pos.x - lastVizX) > 0.0008 || Math.abs(pos.y - lastVizY) > 0.0008)) {
+                    lastVizX = pos.x;
+                    lastVizY = pos.y;
+                    updateVisualsFromXY(pos.x, pos.y);
                 }
             }
 
             const seqView = document.getElementById('sidebar-view-seq');
             const seqVisible = !!seqView && !seqView.hidden;
-            const visual = state.activePadIndex != null
-                ? markerSequencer.getLaneVisual(state.activePadIndex)
+            const visual = seqRunning || seqVisible
+                ? (state.activePadIndex != null ? markerSequencer.getLaneVisual(state.activePadIndex) : null)
                 : null;
             if (seqVisible) {
                 markerRack?.updateLive(visual);
@@ -1411,10 +1643,12 @@ function startVisualizationLoop() {
                     ? new Map(visual.markers.filter(m => m.driftMs > 0).map(m => [m.id, m.liveSec]))
                     : null;
                 waveform.setPlaybackVisual(visual?.playheadSec ?? null, live && live.size > 0 ? live : null);
+                syncMarkerSurvey(visual);
             } else {
                 waveform.setPlaybackVisual(null, null);
+                xy.setMarkerSurvey?.(null);
             }
-            
+
             lastUpdate = now;
         }
         requestAnimationFrame(loop);
@@ -1465,44 +1699,42 @@ function updateVisualsFromXY(x: number, y: number) {
     const { granular: granularUpdate, effects: fxUpdate, selectionPos: selectionPosUpdate } = ParameterMapper.mapParams(
         weights,
         baseParams,
-        cornerMapping
+        cornerMapping,
+        (() => {
+            const idx = state.activePadIndex ?? 0;
+            const region = state.regions.get(idx);
+            const dur = activeAudioBuffer()?.duration ?? state.buffer?.duration ?? null;
+            const maxMs = grainSizeMaxMs(region, dur);
+            return {
+                grainSizeMs: { min: GRAIN_SIZE_MIN_MS, max: maxMs },
+                randomStartMs: { min: RANDOM_START_MIN_MS, max: randomStartMaxMs(region, dur) }
+            };
+        })()
     );
     
     // 3. Apply selectionPos to buffer if calculated
-    if (selectionPosUpdate !== undefined && state.buffer && state.activePadIndex != null) {
-        const region = state.regions.get(state.activePadIndex);
-        if (region) {
-            const width = region.end - region.start;
-            const movable = Math.max(0, state.buffer.duration - width);
-            if (movable > 0) {
-                const newStart = selectionPosUpdate * movable;
-                const newEnd = newStart + width;
-                // Clamp to buffer bounds
-                const clampedStart = Math.max(0, Math.min(newStart, state.buffer.duration - width));
-                const clampedEnd = Math.min(state.buffer.duration, clampedStart + width);
-                
-                // Update Waveform Visual UI silently without polluting pad region store during temporary morph
-                isXYMorphing = true;
-                waveform.setSelection(clampedStart, clampedEnd);
-                updateSelPosUI();
-                const seq = getMarkerSeq(state.activePadIndex);
-                const storedRegion = state.regions.get(state.activePadIndex);
-                if (storedRegion && state.buffer) {
-                    const live = { start: clampedStart, end: clampedEnd };
-                    waveform.setMarkers(shiftMarkersWithRegion(seq.markers, storedRegion, live, state.buffer.duration));
-                    waveform.setRegionRange(live);
-                    syncMarkerEngine(state.activePadIndex, live);
-                    markersLiveShifted = true;
-                }
-                isXYMorphing = false;
-            }
-        }
-    } else if (markersLiveShifted && state.activePadIndex != null) {
+    if (state.activePadIndex != null) {
         const storedRegion = state.regions.get(state.activePadIndex);
-        waveform.setMarkers(getMarkerSeq(state.activePadIndex).markers);
-        waveform.setRegionRange(storedRegion);
-        syncMarkerEngine(state.activePadIndex);
-        markersLiveShifted = false;
+        const live = liveSelectionForPad(state.activePadIndex);
+        const shifted = live ? resolveMarkerPlayback(state.activePadIndex, live).markers : getMarkerSeq(state.activePadIndex).markers;
+        const isLive = !!(live && storedRegion && (
+            Math.abs(live.start - storedRegion.start) > 1e-6 || Math.abs(live.end - storedRegion.end) > 1e-6
+        ));
+        if (isLive && live) {
+            isXYMorphing = true;
+            waveform.setSelection(live.start, live.end);
+            updateSelPosUI();
+            waveform.setMarkers(shifted);
+            waveform.setRegionRange(live);
+            syncMarkerEngine(state.activePadIndex, live);
+            markersLiveShifted = true;
+            isXYMorphing = false;
+        } else if (markersLiveShifted) {
+            waveform.setMarkers(getMarkerSeq(state.activePadIndex).markers);
+            waveform.setRegionRange(storedRegion);
+            syncMarkerEngine(state.activePadIndex);
+            markersLiveShifted = false;
+        }
     }
     
     // Quantize pitch for UI display if scale is active
@@ -1602,7 +1834,7 @@ updatePadGrid();
             // Update ACTIVE voice if exists (for visual feedback? No, for sound)
             const voice = state.voiceManager?.getActiveVoiceForPad(index);
             if (voice) {
-                voice.engine.setAllParams(target.granular, target.effects, safeRegion);
+                voice.engine.setAllParams(toEngineGranular(target.granular, safeRegion), target.effects, safeRegion);
             }
 			
 			// Visual updates for instant recall
@@ -1704,7 +1936,7 @@ updatePadGrid();
 			// This effectively scrubs audio across the file during transition!
             const voice = state.voiceManager?.getActiveVoiceForPad(index);
             if (voice) {
-			    voice.engine.setAllParams(interpG, interpFx, interpRegion);
+			    voice.engine.setAllParams(toEngineGranular(interpG, interpRegion), interpFx, interpRegion);
             }
 			
 			// Sincronizza il riverbero con l'XYPad durante l'interpolazione
@@ -1912,7 +2144,6 @@ if (xy?.onCornerClick) {
 	});
 }
 
-let xyBaseSelectionPos: number | null = null; // 0..1 normalized along movable range
 // Track manual drag on XY pad to allow overriding motion automation safely
 let xyUserDragging = false;
 let xyUserUsingKeyboard = false;
@@ -2115,7 +2346,9 @@ bindAppHost(ctx, {
 	applyDelaySyncForPad,
 	initMIDI,
 	highlightPending,
-	markSessionDirty
+	markSessionDirty,
+	playMarkerSlice,
+	releaseMarkerSlice
 });
 ctx.tiles = createParamTiles(ctx);
 ctx.tiles.init();

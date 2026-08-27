@@ -7,6 +7,7 @@ const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 // (renderer would die during AudioContext.decodeAudioData for certain files).
 // Disabling the audio service sandbox keeps the renderer alive while we investigate.
 app.commandLine.appendSwitch('disable-features', 'AudioServiceSandbox,AudioServiceOutOfProcess');
+app.commandLine.appendSwitch('enable-blink-features', 'WebMIDI');
 
 // Keep a global reference of the window object
 let mainWindow;
@@ -24,9 +25,8 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: true, // Keep enabled for security, but allow local resources
-      // Web Audio API is enabled by default in Electron
-      // Note: Security warnings in dev mode are expected and won't appear in production
+      webSecurity: true,
+      enableBlinkFeatures: 'WebMIDI',
     },
     icon: path.join(__dirname, '../public/icons/icon.png'),
     title: 'Undergrain',
@@ -158,6 +158,14 @@ app.whenReady().then(() => {
   // Create application menu
   createMenu();
   
+  session.defaultSession.setPermissionCheckHandler((_webContents, permission) => {
+    void permission;
+    return true;
+  });
+  session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
+    callback(true);
+  });
+
   // Handle getDisplayMedia requests (required for video recording)
   // This is crucial even if we use getDesktopSources + getUserMedia, because
   // if that fails, we fallback to getDisplayMedia, which needs this handler to work in Electron.

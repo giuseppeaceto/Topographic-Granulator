@@ -174,9 +174,26 @@ fn make_index_range() -> [u16; MAX_GRAINS] {
     ids
 }
 
+const CLASSIC_GRAIN_MS: f32 = 200.0;
+const CLASSIC_MAX_OVERLAP: f32 = 8.0;
+const LOOP_OVERLAP: f32 = 1.15;
+
 fn overlap_compensation(density: f32, grain_size_ms: f32) -> f32 {
     let overlap = density.max(0.1) * (grain_size_ms / 1000.0).max(0.001);
     (REF_OVERLAP / overlap.max(REF_OVERLAP)).sqrt()
+}
+
+fn effective_density(density: f32, grain_size_ms: f32, region_ms: f32) -> f32 {
+    let d = density.max(0.1);
+    let grain = grain_size_ms.max(10.0);
+    if grain <= CLASSIC_GRAIN_MS {
+        return d;
+    }
+    let span = (region_ms - CLASSIC_GRAIN_MS).max(1.0);
+    let t = ((grain - CLASSIC_GRAIN_MS) / span).clamp(0.0, 1.0);
+    let max_overlap = CLASSIC_MAX_OVERLAP * (1.0 - t) + LOOP_OVERLAP * t;
+    let grain_sec = grain / 1000.0;
+    d.min(max_overlap / grain_sec).max(0.1)
 }
 
 #[wasm_bindgen]
@@ -288,7 +305,14 @@ impl GranularEngine {
         self.random_start_ms = random_start_ms;
         self.pitch_semitones = pitch_semitones;
         self.target_pitch_semitones = pitch_semitones as f64;
-        self.overlap_comp_target = overlap_compensation(self.density, self.grain_size_ms);
+        let grain_ms = self.grain_size_ms.min(self.region_ms());
+        let density = effective_density(self.density, grain_ms, self.region_ms());
+        self.overlap_comp_target = overlap_compensation(density, grain_ms);
+    }
+
+    fn region_ms(&self) -> f32 {
+        let samples = self.region_end_target.saturating_sub(self.region_start_target).max(1) as f32;
+        samples / self.sample_rate.max(1.0) * 1000.0
     }
 
     fn set_effect_params_internal(
@@ -534,7 +558,8 @@ impl GranularEngine {
         let output_l = unsafe { std::slice::from_raw_parts_mut(output_l_ptr, len) };
         let output_r = unsafe { std::slice::from_raw_parts_mut(output_r_ptr, len) };
 
-        let density = self.density.max(0.1);
+        let grain_ms = self.grain_size_ms.min(self.region_ms());
+        let density = effective_density(self.density, grain_ms, self.region_ms());
         let interval_samples = self.sample_rate / density;
         let buf_len = self.audio_buffer.len();
         let can_spawn = buf_len > 0 && self.is_playing && self.auto_spawn;
@@ -631,7 +656,8 @@ impl GranularEngine {
             start = (reg_end - 1.0).max(reg_start);
         }
 
-        let length = ((self.grain_size_ms / 1000.0) as f64 * (self.sample_rate as f64)).max(1.0);
+        let requested = ((self.grain_size_ms / 1000.0) as f64 * (self.sample_rate as f64)).max(1.0);
+        let length = requested.min(reg_len);
         let pan = (self.rng.next_f32() * 2.0 - 1.0) * GRAIN_PAN_WIDTH;
 
         self.free_count -= 1;

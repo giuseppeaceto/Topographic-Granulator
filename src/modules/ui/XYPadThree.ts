@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { XYPad } from './XYPad';
+import type { MarkerSurveyState, XYPad } from './XYPad';
 
 type CornerLabels = { tl?: string; tr?: string; bl?: string; br?: string };
 type CornerKey = 'tl' | 'tr' | 'bl' | 'br';
@@ -35,7 +35,7 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 		canvas,
 		antialias: true,
 		alpha: false,
-		powerPreference: 'high-performance'
+		powerPreference: 'default'
 	});
 
 	const scene = new THREE.Scene();
@@ -70,6 +70,7 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 		br: new THREE.Color(CORNER_DEFAULTS.br)
 	};
 	const tmpColor = new THREE.Color();
+	const motionColor = new THREE.Color(0xA880C0);
 	const fog = new THREE.Fog(0x0C0C0B, 1.4, 8);
 	scene.fog = fog;
 
@@ -84,6 +85,7 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 			const raw = root.getPropertyValue(CORNER_CSS_VARS[key]);
 			cornerColors[key].setHex(parseCssHex(raw, CORNER_DEFAULTS[key]));
 		});
+		motionColor.setHex(parseCssHex(root.getPropertyValue('--color-motion'), 0xA880C0));
 		if (cornersReady) syncCornerMaterials();
 	}
 
@@ -216,7 +218,9 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 		opacity: 0.55,
 		fog: true
 	});
-	terrain.add(new THREE.LineSegments(rainGeometry, rainMaterial));
+	const rainLines = new THREE.LineSegments(rainGeometry, rainMaterial);
+	rainLines.visible = false;
+	terrain.add(rainLines);
 
 	const knobGeom = new THREE.SphereGeometry(1, 16, 16);
 	const knobMat = new THREE.MeshStandardMaterial({
@@ -236,6 +240,180 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 	const PAD_COLORS_HEX = [0xA1E34B, 0x66D9EF, 0xFDBC40, 0xFF7AA2, 0x7C4DFF, 0x00E5A8, 0xF06292, 0xFFD54F];
 	let lastGhosts: { x: number; y: number; colorIndex: number }[] = [];
 
+	const MARKER_MAX = 16;
+	const ORBIT_PTS = 48;
+	let markerSurvey: MarkerSurveyState | null = null;
+	const surveyGroup = new THREE.Group();
+	surveyGroup.visible = false;
+	terrain.add(surveyGroup);
+
+	const moonGeom = new THREE.SphereGeometry(0.011, 8, 6);
+	const moonMats: THREE.MeshStandardMaterial[] = [];
+	const moons: THREE.Mesh[] = [];
+	for (let i = 0; i < MARKER_MAX; i++) {
+		const mat = new THREE.MeshStandardMaterial({
+			color: motionColor,
+			emissive: motionColor,
+			emissiveIntensity: 0.25,
+			metalness: 0.2,
+			roughness: 0.4,
+			transparent: true,
+			opacity: 0.85,
+			fog: true
+		});
+		const moon = new THREE.Mesh(moonGeom, mat);
+		moon.visible = false;
+		moonMats.push(mat);
+		moons.push(moon);
+		surveyGroup.add(moon);
+	}
+
+	const orbitPositions = new Float32Array(ORBIT_PTS * 3);
+	const orbitGeom = new THREE.BufferGeometry();
+	orbitGeom.setAttribute('position', new THREE.BufferAttribute(orbitPositions, 3));
+	const orbitMat = new THREE.LineBasicMaterial({
+		color: motionColor,
+		transparent: true,
+		opacity: 0.28,
+		fog: true
+	});
+	const orbitRing = new THREE.LineLoop(orbitGeom, orbitMat);
+	surveyGroup.add(orbitRing);
+
+	const playheadGeom = new THREE.SphereGeometry(0.015, 10, 8);
+	const playheadMat = new THREE.MeshStandardMaterial({
+		color: motionColor,
+		emissive: motionColor,
+		emissiveIntensity: 0.7,
+		metalness: 0.15,
+		roughness: 0.35,
+		transparent: true,
+		opacity: 0.95,
+		fog: true
+	});
+	const playhead = new THREE.Mesh(playheadGeom, playheadMat);
+	playhead.visible = false;
+	surveyGroup.add(playhead);
+
+	function syncSurveyMaterials() {
+		orbitMat.color.copy(motionColor);
+		playheadMat.color.copy(motionColor);
+		playheadMat.emissive.copy(motionColor);
+		moonMats.forEach((mat) => {
+			mat.color.copy(motionColor);
+			mat.emissive.copy(motionColor);
+		});
+	}
+
+	function surveyT(sec: number, region: { start: number; end: number } | null, markers: MarkerSurveyState['markers']): number {
+		let lo = region ? Math.min(region.start, region.end) : 0;
+		let hi = region ? Math.max(region.start, region.end) : 1;
+		if (!region && markers.length > 0) {
+			lo = Math.min(...markers.map(m => m.timeSec));
+			hi = Math.max(...markers.map(m => m.timeSec));
+		}
+		if (hi - lo < 0.0008) return 0.5;
+		return Math.max(0, Math.min(1, (sec - lo) / (hi - lo)));
+	}
+
+	function hash01(id: string): number {
+		let h = 2166136261;
+		for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619);
+		return (h >>> 0) / 4294967295;
+	}
+
+	function clampPad(v: number) {
+		return Math.max(0.03, Math.min(0.97, v));
+	}
+
+	function orbitPoint(cx: number, cy: number, angle: number, radius: number, kx: number, ky: number) {
+		const x = clampPad(cx + Math.cos(angle) * radius);
+		const y = clampPad(cy + Math.sin(angle) * radius);
+		const lift = 0.024 + 0.01 * Math.sin(angle * 2);
+		const z = heightAt(x, y, kx, ky) + lift;
+		return { x, y, z };
+	}
+
+	function layoutSurvey() {
+		const kx = pos.x;
+		const ky = 1 - pos.y;
+		const survey = markerSurvey;
+		if (!survey || survey.markers.length === 0) {
+			surveyGroup.visible = false;
+			playhead.visible = false;
+			return;
+		}
+		surveyGroup.visible = true;
+		const count = Math.min(MARKER_MAX, survey.markers.length);
+		const hit = Math.max(0, 1 - survey.hitAge / 0.35);
+		const bloom = survey.bloom;
+		const spin = survey.running ? tSec * 0.42 : 0;
+		const radius = 0.09 + bloom * 0.045;
+
+		for (let i = 0; i < ORBIT_PTS; i++) {
+			const a = (i / ORBIT_PTS) * Math.PI * 2 + spin;
+			const p = orbitPoint(kx, ky, a, radius, kx, ky);
+			orbitPositions[i * 3] = p.x;
+			orbitPositions[i * 3 + 1] = p.y;
+			orbitPositions[i * 3 + 2] = p.z;
+		}
+		const oAttr = orbitGeom.getAttribute('position') as THREE.BufferAttribute;
+		oAttr.set(orbitPositions);
+		oAttr.needsUpdate = true;
+		orbitGeom.computeBoundingSphere();
+		orbitMat.opacity = survey.running ? 0.38 : 0.22;
+
+		for (let i = 0; i < MARKER_MAX; i++) {
+			const moon = moons[i];
+			const mat = moonMats[i];
+			if (i >= count) {
+				moon.visible = false;
+				continue;
+			}
+			const m = survey.markers[i];
+			const t = surveyT(m.liveSec, survey.region, survey.markers);
+			const seed = hash01(m.id);
+			const drift = m.driftMs > 0 ? 0.012 * Math.sin(tSec * (1.2 + seed * 1.8) + seed * 6) : 0;
+			const angle = t * Math.PI * 2 - Math.PI / 2 + spin + drift * 4;
+			const r = radius + drift + (m.id === survey.playingId ? -0.012 : seed * 0.008);
+			const p = orbitPoint(kx, ky, angle, r, kx, ky);
+			const active = m.id === survey.playingId;
+			moon.visible = true;
+			moon.position.set(p.x, p.y, p.z + (active ? 0.008 : 0));
+			moon.scale.setScalar(active ? 1.45 + bloom * 0.7 + hit * 0.4 : 0.85 + seed * 0.2);
+			mat.opacity = active ? 1 : (survey.running ? 0.78 : 0.62);
+			mat.emissiveIntensity = active ? 0.85 + bloom * 0.8 + hit * 0.4 : 0.22;
+		}
+
+		if (survey.playheadSec != null) {
+			const t = surveyT(survey.playheadSec, survey.region, survey.markers);
+			const angle = t * Math.PI * 2 - Math.PI / 2 + spin;
+			const p = orbitPoint(kx, ky, angle, radius, kx, ky);
+			playhead.visible = true;
+			playhead.position.set(p.x, p.y, p.z + 0.01);
+			playhead.scale.setScalar(1.05 + bloom * 0.7 + hit * 0.35);
+			playheadMat.emissiveIntensity = 0.6 + bloom * 0.9 + hit * 0.45;
+		} else {
+			playhead.visible = false;
+		}
+	}
+
+	function markerSurveyNeedsTick() {
+		if (!markerSurvey || markerSurvey.markers.length === 0) return false;
+		if (markerSurvey.running) return true;
+		if (markerSurvey.bloom > 0.03) return true;
+		if (markerSurvey.hitAge < 0.45) return true;
+		if (markerSurvey.playheadSec != null) return true;
+		return false;
+	}
+
+	function setMarkerSurvey(state: MarkerSurveyState | null) {
+		markerSurvey = state;
+		layoutSurvey();
+		if (markerSurveyNeedsTick()) ensureAnimating();
+		if (!animating) renderOnce();
+	}
+
 	let reverbMix = 0;
 	let filterCutoffHz = 4000;
 	let cutoffCornerWeight = 0;
@@ -248,7 +426,7 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 	let tSec = 0;
 	let rippleOX = 0.5;
 	let rippleOY = 0.5;
-	let rippleT0 = 0;
+	let rippleT0 = -100;
 
 	const influence = 0.25;
 	const influenceSq = influence * influence;
@@ -493,6 +671,10 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 			}
 		}
 
+		if (markerSurvey && markerSurvey.markers.length > 0) {
+			layoutSurvey();
+		}
+
 		material.opacity = 0.9;
 	}
 
@@ -663,9 +845,42 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 
 	let animId: number | null = null;
 	let animating = false;
-	let hasActiveGhosts = false;
 	let lastFrame = performance.now();
+
+	function rippleAlive() {
+		const elapsed = Math.max(0, tSec - rippleT0);
+		return elapsed < 4.2;
+	}
+
+	function needsContinuousAnimation() {
+		if (document.hidden) return false;
+		if (rippleAlive()) return true;
+		if (densityIntensity() > 0.001) return true;
+		if (markerSurveyNeedsTick()) return true;
+		return false;
+	}
+
+	function syncTime() {
+		tSec = (performance.now() - tStart) / 1000;
+	}
+
+	function ensureAnimating() {
+		if (animating || !needsContinuousAnimation()) return;
+		animating = true;
+		lastFrame = performance.now();
+		rainLines.visible = true;
+		animId = requestAnimationFrame(animate) as unknown as number;
+	}
+
 	function animate() {
+		animId = null;
+		if (!needsContinuousAnimation()) {
+			animating = false;
+			rainLines.visible = false;
+			updateColorsAndKnob();
+			renderOnce();
+			return;
+		}
 		const now = performance.now();
 		const dt = Math.min(0.05, (now - lastFrame) / 1000);
 		lastFrame = now;
@@ -683,9 +898,12 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 	function clamp(v: number, min: number, max: number) { return Math.max(min, Math.min(max, v)); }
 
 	function setPosition(x: number, y: number) {
-		pos.x = clamp(x, 0, 1);
-		pos.y = clamp(y, 0, 1);
-		if (!animating) {
+		const nx = clamp(x, 0, 1);
+		const ny = clamp(y, 0, 1);
+		const moved = Math.abs(nx - pos.x) > 0.0004 || Math.abs(ny - pos.y) > 0.0004;
+		pos.x = nx;
+		pos.y = ny;
+		if (moved && !animating) {
 			updateColorsAndKnob();
 			renderOnce();
 		}
@@ -694,8 +912,11 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 	function getPosition() { return { ...pos }; }
 
 	function setPositionSilent(x: number, y: number) {
-		pos.x = clamp(x, 0, 1);
-		pos.y = clamp(y, 0, 1);
+		const nx = clamp(x, 0, 1);
+		const ny = clamp(y, 0, 1);
+		if (Math.abs(nx - pos.x) <= 0.0004 && Math.abs(ny - pos.y) <= 0.0004) return;
+		pos.x = nx;
+		pos.y = ny;
 		if (!animating) {
 			updateColorsAndKnob();
 			renderOnce();
@@ -791,13 +1012,11 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 		if (!dragging) return;
 		dragging = false;
 		(canvas as HTMLCanvasElement & { releasePointerCapture?: (id: number) => void }).releasePointerCapture?.(ev.pointerId);
+		syncTime();
 		rippleOX = pos.x;
 		rippleOY = 1 - pos.y;
 		rippleT0 = tSec;
-		if (!animating) {
-			animating = true;
-			animate();
-		}
+		ensureAnimating();
 	}
 
 	canvas.addEventListener('pointerdown', onPointerDown);
@@ -849,10 +1068,11 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 			cancelAnimationFrame(kbAnimId);
 			kbAnimId = null;
 			if (kbMoved) {
+				syncTime();
 				rippleOX = pos.x;
 				rippleOY = 1 - pos.y;
 				rippleT0 = tSec;
-				if (!animating) { animating = true; animate(); }
+				ensureAnimating();
 			}
 		}
 	}
@@ -877,14 +1097,26 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 	});
 	try { ro.observe(canvas); } catch {}
 
+	function onVisibility() {
+		if (document.hidden) {
+			if (animId != null) {
+				cancelAnimationFrame(animId);
+				animId = null;
+			}
+			animating = false;
+			rainLines.visible = false;
+			return;
+		}
+		ensureAnimating();
+		if (!animating) renderOnce();
+	}
+	document.addEventListener('visibilitychange', onVisibility);
+
 	updateFog();
 	syncBufferToCss();
 	updateColorsAndKnob();
 	renderOnce();
-	if (!animating) {
-		animating = true;
-		animate();
-	}
+	ensureAnimating();
 
 	function setSpeed(normal: number, shift: number) {
 		normalSpeed = Math.max(0.01, Math.min(2.0, normal));
@@ -909,9 +1141,8 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 	function setDensity(dens: number, cornerWeight: number) {
 		density = Math.max(1, Math.min(60, dens));
 		densityCornerWeight = Math.max(0, Math.min(1, cornerWeight));
-		if (!animating && densityCornerWeight > 0) {
-			animating = true;
-			animate();
+		if (densityCornerWeight > 0) {
+			ensureAnimating();
 		}
 		if (!animating) {
 			updateColorsAndKnob();
@@ -921,20 +1152,27 @@ export function createXYPadThree(canvas: HTMLCanvasElement): XYPad {
 
 	function updateTheme() {
 		readThemeColors();
+		syncSurveyMaterials();
 		updateColorsAndKnob();
 		renderOnce();
 	}
 
-	function setGhostPositions(positions: { x: number; y: number; colorIndex: number }[]) {
-		hasActiveGhosts = positions.length > 0;
-		updateGhosts(positions);
-		if (hasActiveGhosts && !animating) {
-			animating = true;
-			animate();
-		} else {
-			renderOnce();
+	function ghostsChanged(positions: { x: number; y: number; colorIndex: number }[]) {
+		if (positions.length !== lastGhosts.length) return true;
+		for (let i = 0; i < positions.length; i++) {
+			const a = positions[i];
+			const b = lastGhosts[i];
+			if (a.colorIndex !== b.colorIndex) return true;
+			if (Math.abs(a.x - b.x) > 0.0008 || Math.abs(a.y - b.y) > 0.0008) return true;
 		}
+		return false;
 	}
 
-	return { setPosition, getPosition, onChange, setCornerLabels, setSpeed, setReverbMix, setFilterCutoff, setDensity, updateTheme, setPositionSilent, setGhostPositions, onCornerClick };
+	function setGhostPositions(positions: { x: number; y: number; colorIndex: number }[]) {
+		if (!ghostsChanged(positions)) return;
+		updateGhosts(positions);
+		if (!animating) renderOnce();
+	}
+
+	return { setPosition, getPosition, onChange, setCornerLabels, setSpeed, setReverbMix, setFilterCutoff, setDensity, updateTheme, setPositionSilent, setGhostPositions, setMarkerSurvey, onCornerClick };
 }

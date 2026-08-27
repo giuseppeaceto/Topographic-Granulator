@@ -10,5 +10,16 @@ export type XYPad = {
 	setDensity?: (density: number, cornerWeight: number) => void;
 	updateTheme?: () => void;
 	setGhostPositions?: (positions: { x: number, y: number, colorIndex: number }[]) => void;
+	setMarkerSurvey?: (state: MarkerSurveyState | null) => void;
 	onCornerClick?: (cb: (cornerKey: 'tl' | 'tr' | 'bl' | 'br', ev: PointerEvent) => void) => void;
+};
+
+export type MarkerSurveyState = {
+	region: { start: number; end: number } | null;
+	markers: { id: string; timeSec: number; liveSec: number; driftMs: number }[];
+	playingId: string | null;
+	playheadSec: number | null;
+	bloom: number;
+	running: boolean;
+	hitAge: number;
 };

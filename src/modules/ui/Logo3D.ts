@@ -32,8 +32,9 @@ function readCss(name: string, fallback: string) {
 }
 
 export function createLogo3D(canvas: HTMLCanvasElement, _options: Logo3DOptions = {}) {
-	const ctx = canvas.getContext('2d');
-	if (!ctx) return;
+	const maybeCtx = canvas.getContext('2d');
+	if (!maybeCtx) return;
+	const ctx: CanvasRenderingContext2D = maybeCtx;
 
 	const rotY = 0.42;
 	const rotX = 0.55;
@@ -51,10 +52,12 @@ export function createLogo3D(canvas: HTMLCanvasElement, _options: Logo3DOptions 
 		const rect = canvas.getBoundingClientRect();
 		hoverTX = ((e.clientX - rect.left) / rect.width - 0.5) * 2;
 		hoverTY = ((e.clientY - rect.top) / rect.height - 0.5) * 2;
+		kick();
 	});
 	canvas.addEventListener('mouseleave', () => {
 		hoverTX = 0;
 		hoverTY = 0;
+		kick();
 	});
 
 	function syncBuffer() {
@@ -80,12 +83,26 @@ export function createLogo3D(canvas: HTMLCanvasElement, _options: Logo3DOptions 
 		return { x: x1 * persp, y: y2 * persp, z: z2 };
 	}
 
+	function hoverSettled() {
+		return Math.abs(hoverTX - hoverX) < 0.0008 && Math.abs(hoverTY - hoverY) < 0.0008;
+	}
+
+	function kick() {
+		if (animationFrameId !== null || document.hidden) return;
+		lastTime = performance.now();
+		animationFrameId = requestAnimationFrame(render);
+	}
+
 	function render() {
 		const now = performance.now();
 		const dt = Math.min((now - lastTime) / 1000, 0.1);
 		lastTime = now;
 		hoverX += (hoverTX - hoverX) * (1 - Math.exp(-dt * 8));
 		hoverY += (hoverTY - hoverY) * (1 - Math.exp(-dt * 8));
+		if (hoverSettled()) {
+			hoverX = hoverTX;
+			hoverY = hoverTY;
+		}
 		syncBuffer();
 
 		const width = canvas.width;
@@ -132,14 +149,31 @@ export function createLogo3D(canvas: HTMLCanvasElement, _options: Logo3DOptions 
 			ctx.stroke();
 		}
 
-		animationFrameId = requestAnimationFrame(render);
+		if (!hoverSettled() && !document.hidden) {
+			animationFrameId = requestAnimationFrame(render);
+		} else {
+			animationFrameId = null;
+		}
 	}
+
+	function onVisibility() {
+		if (document.hidden) {
+			if (animationFrameId !== null) {
+				cancelAnimationFrame(animationFrameId);
+				animationFrameId = null;
+			}
+			return;
+		}
+		kick();
+	}
+	document.addEventListener('visibilitychange', onVisibility);
 
 	render();
 
 	return {
 		destroy: () => {
 			if (animationFrameId !== null) cancelAnimationFrame(animationFrameId);
+			document.removeEventListener('visibilitychange', onVisibility);
 		},
 		triggerSpin: () => {},
 	};

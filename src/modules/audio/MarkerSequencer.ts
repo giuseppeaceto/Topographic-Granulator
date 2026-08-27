@@ -53,6 +53,7 @@ type LaneState = {
 	lastMarkerTime: number | null;
 	holdLeft: number;
 	needsPick: boolean;
+	sustainClock: boolean;
 	bloomActive: boolean;
 	bloomStart: number;
 	bloomDur: number;
@@ -90,9 +91,12 @@ export type MarkerLaneVisual = {
 export type MarkerSequencer = {
 	syncLane: (padIndex: number, input: MarkerLaneInput) => void;
 	jumpToMarker: (padIndex: number, markerId: string) => void;
+	triggerMarker: (padIndex: number, markerId: string, input: MarkerLaneInput) => boolean;
+	releaseSustain: (padIndex: number) => void;
 	stopLane: (padIndex: number) => void;
 	stopAll: () => void;
 	isLaneRunning: (padIndex: number) => boolean;
+	isLaneActive: (padIndex: number) => boolean;
 	getLaneVisual: (padIndex: number) => MarkerLaneVisual | null;
 	destroy: () => void;
 };
@@ -399,7 +403,7 @@ export function createMarkerSequencer(config: {
 		lane.hitTime = nowSec();
 	}
 
-	function fire(lane: LaneState, marker: Marker, extras: boolean) {
+	function fire(lane: LaneState, marker: Marker, extras: boolean, originTime?: number) {
 		recordPlay(lane, marker);
 		const now = nowSec();
 		const live = liveCopy(lane, marker, now);
@@ -431,7 +435,7 @@ export function createMarkerSequencer(config: {
 
 		if (!extras) return;
 		const interval = rateToSeconds(lane.params.bpm, lane.params.rate);
-		const t0 = lane.nextTime;
+		const t0 = originTime ?? lane.nextTime;
 		if (lane.params.grainMode === 'stutter') {
 			lane.pending.push({ at: t0 + interval / 3, marker });
 			lane.pending.push({ at: t0 + (2 * interval) / 3, marker });
@@ -544,9 +548,7 @@ export function createMarkerSequencer(config: {
 		const now = ctx.currentTime;
 
 		lanes.forEach((lane) => {
-			if (!lane.runningClock) return;
-			const interval = rateToSeconds(lane.params.bpm, lane.params.rate);
-			if (interval <= 0) return;
+			if (!lane.runningClock && !lane.sustainClock) return;
 
 			if (lane.pending.length > 0) {
 				const due = lane.pending.filter(p => p.at <= now);
@@ -557,6 +559,10 @@ export function createMarkerSequencer(config: {
 			updateGlide(lane, now);
 			updateBloom(lane, now);
 			updateDrift(lane, now);
+
+			if (!lane.runningClock) return;
+			const interval = rateToSeconds(lane.params.bpm, lane.params.rate);
+			if (interval <= 0) return;
 
 			let guard = 0;
 			while (lane.nextTime < now + LOOKAHEAD && guard < 8) {
@@ -580,7 +586,7 @@ export function createMarkerSequencer(config: {
 	}
 
 	function maybeStopTimer() {
-		const anyClock = Array.from(lanes.values()).some(l => l.runningClock);
+		const anyClock = Array.from(lanes.values()).some(l => l.runningClock || l.sustainClock);
 		if (!anyClock && timer != null) {
 			clearInterval(timer);
 			timer = null;
@@ -618,6 +624,7 @@ export function createMarkerSequencer(config: {
 			lastMarkerTime: null,
 			holdLeft: 0,
 			needsPick: true,
+			sustainClock: false,
 			bloomActive: false,
 			bloomStart: 0,
 			bloomDur: 0,
@@ -637,22 +644,7 @@ export function createMarkerSequencer(config: {
 		};
 	}
 
-	function syncLane(padIndex: number, input: MarkerLaneInput) {
-		const inRegion = markersInRegion(input.params.markers, input.region);
-		const canRun = input.enabled && input.playing && inRegion.length > 0;
-
-		if (!canRun) {
-			if (lanes.has(padIndex)) stopLane(padIndex);
-			return;
-		}
-
-		let lane = lanes.get(padIndex);
-		const isNew = !lane;
-		if (!lane) {
-			lane = createLane(padIndex, input);
-			lanes.set(padIndex, lane);
-		}
-
+	function applyLaneInput(lane: LaneState, input: MarkerLaneInput) {
 		lane.params = input.params;
 		lane.region = input.region;
 		lane.density = input.density;
@@ -660,22 +652,63 @@ export function createMarkerSequencer(config: {
 		if (lane.params.grainMode !== 'bloom') {
 			clearBloom(lane);
 		}
+	}
 
-		if (input.params.pattern === 'off') {
-			lane.runningClock = false;
-			clearBloom(lane);
-			if (isNew) fireCurrent(lane, false);
-			maybeStopTimer();
+	function endSustain(lane: LaneState) {
+		if (!lane.sustainClock) return;
+		lane.sustainClock = false;
+		lane.pending = [];
+		lane.glideDur = 0;
+		clearBloom(lane);
+		maybeStopTimer();
+	}
+
+	function syncLane(padIndex: number, input: MarkerLaneInput) {
+		const inRegion = markersInRegion(input.params.markers, input.region);
+		const canRun = input.enabled && input.playing && inRegion.length > 0;
+		const lane = lanes.get(padIndex);
+
+		if (!canRun) {
+			if (lane?.sustainClock && input.playing && inRegion.length > 0) {
+				applyLaneInput(lane, input);
+				lane.runningClock = false;
+				ensureTimer();
+				return;
+			}
+			if (lanes.has(padIndex)) stopLane(padIndex);
 			return;
 		}
 
-		if (isNew || !lane.runningClock) {
+		const isNew = !lane;
+		if (!lane) {
+			const created = createLane(padIndex, input);
+			lanes.set(padIndex, created);
+			applyLaneInput(created, input);
+		} else {
+			applyLaneInput(lane, input);
+		}
+		const next = lanes.get(padIndex)!;
+
+		if (input.params.pattern === 'off') {
+			next.runningClock = false;
+			if (!next.sustainClock) {
+				clearBloom(next);
+				if (isNew) fireCurrent(next, false);
+				maybeStopTimer();
+			} else {
+				ensureTimer();
+			}
+			return;
+		}
+
+		if (isNew || !next.runningClock) {
 			const ctx = config.getAudioContext();
-			lane.nextTime = ctx.currentTime;
-			lane.step = 0;
-			lane.runningClock = true;
-			fireCurrent(lane, true);
-			lane.nextTime = ctx.currentTime + rateToSeconds(input.params.bpm, input.params.rate);
+			next.nextTime = ctx.currentTime;
+			next.step = 0;
+			next.runningClock = true;
+			next.sustainClock = false;
+			fireCurrent(next, true);
+			next.nextTime = ctx.currentTime + rateToSeconds(input.params.bpm, input.params.rate);
 		}
 
 		ensureTimer();
@@ -693,13 +726,46 @@ export function createMarkerSequencer(config: {
 		fireCurrent(lane, false);
 	}
 
+	function triggerMarker(padIndex: number, markerId: string, input: MarkerLaneInput): boolean {
+		let lane = lanes.get(padIndex);
+		if (!lane) {
+			lane = createLane(padIndex, input);
+			lanes.set(padIndex, lane);
+		}
+		applyLaneInput(lane, input);
+		const list = inRegionMarkers(lane);
+		const idx = list.findIndex(m => m.id === markerId);
+		if (idx < 0) return false;
+		lane.markerCursor = idx;
+		lane.holdLeft = 0;
+		lane.needsPick = false;
+		if (!lane.runningClock) {
+			lane.sustainClock = true;
+		}
+		lane.pending = [];
+		fire(lane, list[idx], true, nowSec());
+		ensureTimer();
+		return true;
+	}
+
+	function releaseSustain(padIndex: number) {
+		const lane = lanes.get(padIndex);
+		if (!lane) return;
+		endSustain(lane);
+	}
+
 	function stopAll() {
 		const ids = Array.from(lanes.keys());
 		ids.forEach(stopLane);
 	}
 
 	function isLaneRunning(padIndex: number) {
-		return lanes.has(padIndex);
+		return !!lanes.get(padIndex)?.runningClock;
+	}
+
+	function isLaneActive(padIndex: number) {
+		const lane = lanes.get(padIndex);
+		return !!lane && (lane.runningClock || lane.sustainClock);
 	}
 
 	function getLaneVisual(padIndex: number): MarkerLaneVisual | null {
@@ -734,7 +800,7 @@ export function createMarkerSequencer(config: {
 		}
 
 		return {
-			running: lane.runningClock,
+			running: lane.runningClock || lane.sustainClock,
 			progress,
 			bloom,
 			grainMode: lane.params.grainMode,
@@ -764,5 +830,5 @@ export function createMarkerSequencer(config: {
 		}
 	}
 
-	return { syncLane, jumpToMarker, stopLane, stopAll, isLaneRunning, getLaneVisual, destroy };
+	return { syncLane, jumpToMarker, triggerMarker, releaseSustain, stopLane, stopAll, isLaneRunning, isLaneActive, getLaneVisual, destroy };
 }

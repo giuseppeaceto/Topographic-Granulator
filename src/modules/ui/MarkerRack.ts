@@ -49,12 +49,35 @@ export type MarkerRack = {
 	setPlaying: (playing: boolean) => void;
 	setHoldEnabled: (enabled: boolean) => void;
 	updateLive: (visual: MarkerLaneVisual | null) => void;
+	setSlices: (state: MarkerSliceView) => void;
 };
+
+export const MARKER_SLICE_SHORTCUTS = ['1', '2', '3', '4', '5', '6', '7', '8', 'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I'] as const;
+export const MARKER_SLICE_CODES = [
+	'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8',
+	'KeyQ', 'KeyW', 'KeyE', 'KeyR', 'KeyT', 'KeyY', 'KeyU', 'KeyI'
+] as const;
+
+export type MarkerSliceView = {
+	padIndex: number;
+	ids: string[];
+	held: number[];
+	pendingSlice: number | null;
+	mapped: number[];
+};
+
+export function sliceIndexFromCode(code: string): number {
+	return (MARKER_SLICE_CODES as readonly string[]).indexOf(code);
+}
 
 export function createMarkerRack(config: {
 	onChange: (patch: Partial<MarkerSeqParams>) => void;
 	onPlayToggle: () => void;
 	onClear: () => void;
+	onSliceDown: (sliceIndex: number) => void;
+	onSliceUp: (sliceIndex: number) => void;
+	onSliceLearn: (sliceIndex: number) => void;
+	isLearnEnabled: () => boolean;
 }): MarkerRack {
 	const playBtn = document.getElementById('markerPlayBtn') as HTMLButtonElement | null;
 	const clearBtn = document.getElementById('markerClearBtn') as HTMLButtonElement | null;
@@ -66,10 +89,12 @@ export function createMarkerRack(config: {
 	const bpmKnob = document.querySelector('.knob[data-knob="marker-bpm"]') as HTMLElement | null;
 	const canvas = document.getElementById('markerTransportCanvas') as HTMLCanvasElement | null;
 	const metaEl = document.getElementById('markerTransportMeta');
+	const sliceKeysEl = document.getElementById('markerSliceKeys');
 	const ctx = canvas?.getContext('2d') ?? null;
 
 	let lastParams: MarkerSeqParams | null = null;
 	let lastVisual: MarkerLaneVisual | null = null;
+	let lastSlices: MarkerSliceView = { padIndex: 0, ids: [], held: [], pendingSlice: null, mapped: [] };
 
 	function cycle<T>(values: T[], current: T, dir: 1 | -1): T {
 		const idx = values.indexOf(current);
@@ -161,6 +186,65 @@ export function createMarkerRack(config: {
 
 	playBtn?.addEventListener('click', () => config.onPlayToggle());
 	clearBtn?.addEventListener('click', () => config.onClear());
+
+	function renderSlices() {
+		if (!sliceKeysEl) return;
+		const ids = lastSlices.ids;
+		if (ids.length === 0) {
+			sliceKeysEl.classList.add('is-empty');
+			sliceKeysEl.innerHTML = 'Shift-click waveform, then play slices here';
+			return;
+		}
+		sliceKeysEl.classList.remove('is-empty');
+		const held = new Set(lastSlices.held);
+		const mapped = new Set(lastSlices.mapped);
+		const playingId = lastVisual?.playingId ?? null;
+		sliceKeysEl.replaceChildren();
+		ids.forEach((id, i) => {
+			const btn = document.createElement('button');
+			btn.type = 'button';
+			btn.className = 'marker-slice';
+			btn.dataset.slice = String(i);
+			btn.title = `Play marker ${i + 1} (${MARKER_SLICE_SHORTCUTS[i] ?? ''})`;
+			if (held.has(i)) btn.classList.add('is-held');
+			if (playingId === id) btn.classList.add('is-playing');
+			if (mapped.has(i)) btn.classList.add('is-mapped');
+			if (lastSlices.pendingSlice === i) btn.classList.add('learn-pending');
+			btn.setAttribute('aria-pressed', held.has(i) ? 'true' : 'false');
+			const num = document.createElement('span');
+			num.className = 'marker-slice-num';
+			num.textContent = String(i + 1);
+			const key = document.createElement('span');
+			key.className = 'marker-slice-key';
+			key.textContent = MARKER_SLICE_SHORTCUTS[i] ?? '';
+			btn.append(num, key);
+			btn.addEventListener('pointerdown', (ev) => {
+				if (ev.button !== 0) return;
+				ev.preventDefault();
+				btn.setPointerCapture?.(ev.pointerId);
+				if (config.isLearnEnabled()) {
+					config.onSliceLearn(i);
+					return;
+				}
+				config.onSliceDown(i);
+			});
+			btn.addEventListener('pointerup', (ev) => {
+				if (ev.button !== 0) return;
+				if (config.isLearnEnabled()) return;
+				config.onSliceUp(i);
+			});
+			btn.addEventListener('pointercancel', () => {
+				if (config.isLearnEnabled()) return;
+				config.onSliceUp(i);
+			});
+			sliceKeysEl.appendChild(btn);
+		});
+	}
+
+	function setSlices(state: MarkerSliceView) {
+		lastSlices = state;
+		renderSlices();
+	}
 
 	function cssVar(name: string, fallback: string): string {
 		if (!canvas) return fallback;
@@ -424,7 +508,16 @@ export function createMarkerRack(config: {
 		lastVisual = visual;
 		drawTransport();
 		updateMeta();
+		if (sliceKeysEl && lastSlices.ids.length > 0) {
+			const playingId = visual?.playingId ?? null;
+			sliceKeysEl.querySelectorAll<HTMLElement>('.marker-slice').forEach((btn) => {
+				const i = Number(btn.dataset.slice);
+				const id = lastSlices.ids[i];
+				btn.classList.toggle('is-playing', !!id && id === playingId);
+			});
+		}
 	}
 
-	return { sync, setPlaying, setHoldEnabled, updateLive };
+	renderSlices();
+	return { sync, setPlaying, setHoldEnabled, updateLive, setSlices };
 }

@@ -2,9 +2,10 @@ import { createGranularWorkletEngine, type GranularWorkletEngine, type GranularP
 import type { EffectsParams } from '../effects/EffectsChain';
 import type { Region } from '../editor/RegionStore';
 import type { MotionPoint, PadParams } from '../editor/PadParamStore';
-import { PARAMS, type ParamId } from '../ui/ParamRegistry';
+import type { ParamRangeOverride } from '../ui/ParamRegistry';
 import { ParameterMapper } from '../utils/ParameterMapper';
 import { quantizePitch } from '../utils/ScaleQuantizer';
+import { GRAIN_SIZE_MIN_MS, grainSizeMaxMs, RANDOM_START_MIN_MS, randomStartMaxMs, toEngineGranular } from '../utils/grainLimits';
 
 export type Voice = {
 	id: number;
@@ -93,29 +94,27 @@ export class VoiceManager {
 				lastAudioBuffer: null
 			});
 		}
-        // Start the internal automation loop
-		this.startAnimationLoop();
 	}
 
     // --- AUTOMATION ENGINE ---
 
     private startAnimationLoop() {
+        if (this.animationFrame !== null) return;
         let lastAudioUpdate = 0;
         const AUDIO_UPDATE_INTERVAL = 33; // ~30fps for audio updates (throttle to reduce CPU)
         
         const loop = () => {
             const now = performance.now();
             const shouldUpdateAudio = (now - lastAudioUpdate) >= AUDIO_UPDATE_INTERVAL;
-            
-            // Fast check: if no active voices, skip update computation
             const hasActiveVoice = this.voices.some(v => v.active);
-            if (hasActiveVoice) {
-                this.updateVoices(shouldUpdateAudio);
-                if (shouldUpdateAudio) {
-                    lastAudioUpdate = now;
-                }
+            if (!hasActiveVoice) {
+                this.animationFrame = null;
+                return;
             }
-            
+            this.updateVoices(shouldUpdateAudio);
+            if (shouldUpdateAudio) {
+                lastAudioUpdate = now;
+            }
             this.animationFrame = requestAnimationFrame(loop);
         };
         this.animationFrame = requestAnimationFrame(loop);
@@ -243,6 +242,22 @@ export class VoiceManager {
         if (voice) this.applyXYToParams(voice);
     }
 
+	private bufferDurationForVoice(voice: Voice): number | null {
+		if (voice.padIndex != null) {
+			return this.getBufferForPad(voice.padIndex)?.duration ?? this.buffer?.duration ?? null;
+		}
+		return this.buffer?.duration ?? null;
+	}
+
+	private durationRangeOverrides(voice: Voice): ParamRangeOverride {
+		const duration = this.bufferDurationForVoice(voice);
+		const maxMs = grainSizeMaxMs(voice.region, duration);
+		return {
+			grainSizeMs: { min: GRAIN_SIZE_MIN_MS, max: maxMs },
+			randomStartMs: { min: RANDOM_START_MIN_MS, max: randomStartMaxMs(voice.region, duration) }
+		};
+	}
+
     private applyXYToParams(voice: Voice) {
         if (!voice.baseParams) return;
 
@@ -255,7 +270,8 @@ export class VoiceManager {
             const mapped = ParameterMapper.mapParams(
                 weights,
                 voice.baseParams,
-                voice.cornerMapping
+                voice.cornerMapping,
+                this.durationRangeOverrides(voice)
             );
             granularUpdate = mapped.granular;
             fxUpdate = mapped.effects;
@@ -273,6 +289,8 @@ export class VoiceManager {
             granular.pitchSemitones = quantizePitch(granular.pitchSemitones, this.activeScaleIndex);
         }
 
+        const engineGranular = toEngineGranular(granular, voice.region, this.bufferDurationForVoice(voice));
+
         // Apply to Engine with Dirty Checking
         // Increased EPSILON to reduce update frequency and CPU load
         // 0.01 = 1% change threshold (was 0.001 = 0.1%)
@@ -288,9 +306,9 @@ export class VoiceManager {
             return false;
         };
 
-        if (hasChanged(granular, voice.lastSentGranular)) {
-            voice.engine.setParams(granular);
-            voice.lastSentGranular = { ...granular };
+        if (hasChanged(engineGranular, voice.lastSentGranular)) {
+            voice.engine.setParams(engineGranular);
+            voice.lastSentGranular = { ...engineGranular };
         }
         if (hasChanged(fx, voice.lastSentFx)) {
             voice.engine.setEffectParams(fx);
@@ -380,6 +398,7 @@ export class VoiceManager {
 		}
 
 		voice.active = true;
+		this.startAnimationLoop();
 		voice.padIndex = padIndex;
 		voice.startTime = performance.now();
         
@@ -417,16 +436,22 @@ export class VoiceManager {
 			voice.lastAudioBuffer = buf;
 		}
 
-		// Set initial params
-        voice.engine.setParams(granular);
-        voice.engine.setEffectParams(effects);
 		voice.engine.setRegion(region.start, region.end);
 		voice.engine.setGrainAnchor(0, false);
 		voice.engine.setAutoSpawn(true);
+		this.applyXYToParams(voice);
         
 		voice.engine.trigger();
 
 		return voice;
+	}
+
+	setVoiceRegion(padIndex: number, region: Region) {
+		const voice = this.getActiveVoiceForPad(padIndex);
+		if (!voice) return;
+		voice.region = { ...region };
+		voice.engine.setRegion(region.start, region.end);
+		this.applyXYToParams(voice);
 	}
 
 	setVoiceGrainAnchor(padIndex: number, timeSec: number, enabled: boolean) {

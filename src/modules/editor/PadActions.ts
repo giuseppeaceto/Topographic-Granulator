@@ -3,8 +3,15 @@ import { MAX_PADS, PAD_COLORS } from '../app/AppContext';
 import { PAD_ICONS } from '../ui/PadGrid';
 import type { Region } from './RegionStore';
 import { clonePadParams, emptyPadParams } from '../session/SessionStore';
-import { saveMappings } from '../midi/MidiManager';
+import { saveMappings, parseMarkerTarget } from '../midi/MidiManager';
 import { quantizePitch } from '../utils/ScaleQuantizer';
+import {
+	durationKnobFromNorm,
+	GRAIN_SIZE_MIN_MS,
+	grainSizeMaxMs,
+	RANDOM_START_MIN_MS,
+	randomStartMaxMs
+} from '../utils/grainLimits';
 
 function hexToRgba(hex: string, alpha = 1): string {
 	const m = hex.replace('#', '');
@@ -112,13 +119,22 @@ export function createPadActions(
 		ctx.state.padParams.remove(index);
 
 		ctx.state.midi.mappings = ctx.state.midi.mappings
-			.filter(m => m.targetId !== `pad:${index}`)
+			.filter(m => {
+				if (m.targetId === `pad:${index}`) return false;
+				const marker = parseMarkerTarget(m.targetId);
+				if (marker && marker.padIndex === index) return false;
+				return true;
+			})
 			.map(m => {
 				if (m.targetId.startsWith('pad:')) {
 					const idx = Number(m.targetId.split(':')[1]);
 					if (idx > index) {
 						return { ...m, targetId: `pad:${idx - 1}` };
 					}
+				}
+				const marker = parseMarkerTarget(m.targetId);
+				if (marker && marker.padIndex > index) {
+					return { ...m, targetId: `marker:${marker.padIndex - 1}:${marker.sliceIndex}` };
 				}
 				return m;
 			});
@@ -174,10 +190,14 @@ export function createPadActions(
 
 	function randomizePad(index: number) {
 		ctx.session!.pushUndo();
+		const region = ctx.state.regions.get(index);
+		const bufDur = ctx.session?.bufferForPad(index)?.duration ?? ctx.host.activeAudioBuffer()?.duration ?? null;
+		const maxGrain = grainSizeMaxMs(region, bufDur);
+		const maxRand = randomStartMaxMs(region, bufDur);
 		const granular = {
-			grainSizeMs: Math.round(randRange(10, 200)),
+			grainSizeMs: Math.round(durationKnobFromNorm(Math.random(), GRAIN_SIZE_MIN_MS, maxGrain)),
 			density: Math.round(randRange(1, 60)),
-			randomStartMs: Math.round(randRange(0, 200)),
+			randomStartMs: Math.round(durationKnobFromNorm(Math.random(), RANDOM_START_MIN_MS, maxRand)),
 			pitchSemitones: Math.round(randRange(-12, 12))
 		};
 		const effects = {

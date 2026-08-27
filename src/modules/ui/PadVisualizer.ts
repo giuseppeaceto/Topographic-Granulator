@@ -113,6 +113,8 @@ export function createPadVisualizer(canvas: HTMLCanvasElement, metaEl?: HTMLElem
 		if (next.region !== undefined) region = next.region;
 		rebuildPeaks();
 		updateMeta();
+		render();
+		if (needsTick()) start();
 	}
 
 	function updateMeta() {
@@ -230,6 +232,26 @@ export function createPadVisualizer(canvas: HTMLCanvasElement, metaEl?: HTMLElem
 		}
 	}
 
+	function hoverSettled() {
+		return Math.abs(hoverTX - hoverX) < 0.0008 && Math.abs(hoverTY - hoverY) < 0.0008;
+	}
+
+	function pulsesSettled() {
+		for (let i = 0; i < slots.length; i++) {
+			const target = slots[i]?.playing ? 1 : 0;
+			if (Math.abs((playPulse[i] ?? 0) - target) > 0.008) return false;
+		}
+		return true;
+	}
+
+	function needsTick() {
+		if (document.hidden) return false;
+		if (!hoverSettled()) return true;
+		if (!pulsesSettled()) return true;
+		if (slots.some((s) => s.playing)) return true;
+		return false;
+	}
+
 	function render() {
 		resize();
 		const w = canvas.width;
@@ -257,7 +279,12 @@ export function createPadVisualizer(canvas: HTMLCanvasElement, metaEl?: HTMLElem
 			playPulse[i] = lerp(playPulse[i] ?? 0, target, 1 - Math.exp(-dt * 8));
 		}
 		render();
-		raf = requestAnimationFrame(tick);
+		if (needsTick()) {
+			raf = requestAnimationFrame(tick);
+		} else {
+			running = false;
+			raf = 0;
+		}
 	}
 
 	function start() {
@@ -277,10 +304,12 @@ export function createPadVisualizer(canvas: HTMLCanvasElement, metaEl?: HTMLElem
 		const rect = canvas.getBoundingClientRect();
 		hoverTX = ((e.clientX - rect.left) / rect.width - 0.5) * 2;
 		hoverTY = ((e.clientY - rect.top) / rect.height - 0.5) * 2;
+		start();
 	});
 	canvas.addEventListener('pointerleave', () => {
 		hoverTX = 0;
 		hoverTY = 0;
+		start();
 	});
 
 	const io = new IntersectionObserver((entries) => {
@@ -291,7 +320,7 @@ export function createPadVisualizer(canvas: HTMLCanvasElement, metaEl?: HTMLElem
 	io.observe(canvas);
 
 	const ro = new ResizeObserver(() => {
-		if (running) resize();
+		render();
 	});
 	ro.observe(canvas);
 

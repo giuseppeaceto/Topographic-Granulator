@@ -28,7 +28,7 @@
                   <span class="logo-text">Undergrain</span>
                   <span class="beta-badge">BETA</span>
                 </div>
-                <span class="app-subtitle">topographic granulator <span class="app-version">v0.1.10</span></span>
+                <span class="app-subtitle">topographic granulator <span class="app-version">v0.1.13</span></span>
               </div>
             </div>
 
@@ -174,17 +174,17 @@
                 </div>
                 <div class="param-tile" data-tile="density">
                   <div class="tile-header">DENSITY</div>
-                  <div class="knob" data-knob="density" data-tooltip="Grain density - number of grains per second (1-60)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                  <div class="knob" data-knob="density" data-tooltip="Grain density - number of grains per second (1-60). Long grains automatically thin out toward a loop."><div class="knob-fill"></div><span class="knob-plus">+</span></div>
                   <div class="tile-value" data-val="density">15</div>
                 </div>
                 <div class="param-tile" data-tile="grain">
                   <div class="tile-header">GRAIN</div>
-                  <div class="knob" data-knob="grain" data-tooltip="Grain size in milliseconds (10-200ms)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                  <div class="knob" data-knob="grain" data-tooltip="Grain size from 10ms up to the selection length. Long grains approach a loop."><div class="knob-fill"></div><span class="knob-plus">+</span></div>
                   <div class="tile-value" data-val="grain">80</div>
                 </div>
                 <div class="param-tile" data-tile="rand">
                   <div class="tile-header">RAND</div>
-                  <div class="knob" data-knob="rand" data-tooltip="Random start offset in milliseconds (0-200ms)"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
+                  <div class="knob" data-knob="rand" data-tooltip="Random start offset within the selection"><div class="knob-fill"></div><span class="knob-plus">+</span></div>
                   <div class="tile-value" data-val="rand">40</div>
                 </div>
                 <div class="param-tile" data-tile="selpos">
@@ -319,6 +319,7 @@
             <div class="sidebar-status" role="status">
               <span id="sidebarStatusPad" class="status-chip">PAD —</span>
               <span id="sidebarStatusSeq" class="status-chip">SEQ OFF</span>
+              <span id="sidebarStatusMidi" class="status-chip midi-status-chip" title="MIDI input">MIDI</span>
               <span id="recordStatus" class="status-chip record-status" aria-live="polite">Ready</span>
             </div>
 
@@ -347,7 +348,7 @@
                       </div>
                       <div class="param-tile" data-tile="pad-clear">
                         <div class="tile-header">CLEAR</div>
-                        <button id="clearActivePadBtn" class="rack-action-btn pad-clear-btn" title="Clear active pad assignment" aria-label="Clear active pad assignment">
+                        <button id="clearActivePadBtn" class="rack-action-btn rack-clear-btn" title="Clear active pad assignment" aria-label="Clear active pad assignment">
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <polyline points="3 6 5 6 21 6"></polyline>
                             <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -414,6 +415,7 @@
                     <canvas id="markerTransportCanvas" width="240" height="48"></canvas>
                     <div id="markerTransportMeta" class="marker-transport-meta"></div>
                   </div>
+                  <div class="marker-slice-keys" id="markerSliceKeys" role="group" aria-label="Marker slice keys"></div>
                   <div class="rack-body marker-rack-body">
                     <div class="param-grid-2col">
                       <div class="param-tile" data-tile="marker-play">
@@ -427,11 +429,13 @@
                       </div>
                       <div class="param-tile" data-tile="marker-clear">
                         <div class="tile-header">CLEAR</div>
-                        <button id="markerClearBtn" class="knob knob-btn" title="Clear all markers on this pad" style="cursor: pointer;">
-                          <div class="knob-fill" style="height: 0%;"></div>
-                          <span class="knob-plus">+</span>
+                        <button id="markerClearBtn" class="rack-action-btn rack-clear-btn" title="Clear all markers on this pad" aria-label="Clear all markers on this pad">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <polyline points="3 6 5 6 21 6"></polyline>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                          </svg>
                         </button>
-                        <div class="tile-value">0</div>
+                        <div class="tile-value">MARK</div>
                       </div>
                     </div>
                     <div class="param-tile" data-tile="marker-order">
@@ -544,8 +548,13 @@
                         </div>
                         <div class="param-tile" data-tile="motion-clear">
                           <div class="tile-header">CLEAR</div>
-                          <button id="motionClearBtn" class="knob knob-btn" title="Clear Path" style="cursor: pointer;"><div class="knob-fill" style="height: 0%;"></div><span class="knob-plus">+</span></button>
-                          <div class="tile-value">0</div>
+                          <button id="motionClearBtn" class="rack-action-btn rack-clear-btn" title="Clear Path" aria-label="Clear motion path">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                              <polyline points="3 6 5 6 21 6"></polyline>
+                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                            </svg>
+                          </button>
+                          <div class="tile-value">PATH</div>
                         </div>
                       </div>
                       <div class="param-tile" data-tile="motion-loop">
@@ -621,7 +630,13 @@
                     </div>
                   </div>
                   <div class="utility-section">
-                    <div class="rack-header">MIDI ENGINE</div>
+                    <div class="rack-header">
+                      MIDI ENGINE
+                      <button type="button" class="midi-in-monitor is-off" id="midiInMonitor" title="Click to enable MIDI. The LED flashes when the controller sends notes or CCs.">
+                        <span class="midi-in-led" id="midiInLed" aria-hidden="true"></span>
+                        <span class="midi-in-meta" id="midiInMeta">OFF</span>
+                      </button>
+                    </div>
                     <div class="param-grid-3col">
                       <div class="param-tile" data-tile="midi-learn">
                         <div class="tile-header">LEARN</div>
@@ -635,8 +650,13 @@
                       </div>
                       <div class="param-tile" data-tile="midi-clear">
                         <div class="tile-header">CLEAR</div>
-                        <button id="midiClear" class="knob knob-btn" title="Remove all MIDI assignments" style="cursor: pointer;"><div class="knob-fill" style="height: 0%;"></div><span class="knob-plus">+</span></button>
-                        <div class="tile-value">0</div>
+                        <button id="midiClear" class="rack-action-btn rack-clear-btn" title="Remove all MIDI assignments" aria-label="Remove all MIDI assignments">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <polyline points="3 6 5 6 21 6"></polyline>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                          </svg>
+                        </button>
+                        <div class="tile-value">MAP</div>
                       </div>
                     </div>
                   </div>

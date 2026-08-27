@@ -79,7 +79,8 @@
   transform: scale(0.96);
 }
 
-.pad-clear-btn {
+.pad-clear-btn,
+.rack-clear-btn {
   width: 44px;
   height: 44px;
   padding: 0;
@@ -87,7 +88,8 @@
   flex-shrink: 0;
 }
 
-.pad-clear-btn:hover {
+.pad-clear-btn:hover,
+.rack-clear-btn:hover {
   color: var(--danger);
   border-color: var(--danger-border);
   background: var(--danger-bg);
