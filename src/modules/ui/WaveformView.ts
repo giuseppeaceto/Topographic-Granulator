@@ -26,6 +26,8 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 	let dragMarkerId: string | null = null;
 	let playheadSec: number | null = null;
 	let liveTimes: Map<string, number> | null = null;
+	let grainCursorSec: number | null = null;
+	let grainOriginSec: number | null = null;
 
 	let cachedResample: Float32Array | null = null;
 	let cachedWidth = 0;
@@ -43,6 +45,8 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 		selectedMarkerId = null;
 		playheadSec = null;
 		liveTimes = null;
+		grainCursorSec = null;
+		grainOriginSec = null;
 		draw();
 	}
 
@@ -276,6 +280,7 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 		}
 
 		drawMarkers();
+		drawGrainCursor();
 		drawPlayhead();
 	}
 
@@ -359,6 +364,33 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 			}
 			ctx2d.restore();
 		});
+	}
+
+	function drawGrainCursor() {
+		if (!buffer || grainCursorSec == null) return;
+		const x = timeToX(grainCursorSec);
+		const h = canvas.height;
+		ctx2d.save();
+		if (grainOriginSec != null) {
+			const x0 = timeToX(grainOriginSec);
+			const left = Math.min(x0, x);
+			const width = Math.abs(x - x0);
+			if (width > 2 && x >= x0) {
+				ctx2d.fillStyle = hexToRgba(selectionColor, 0.08);
+				ctx2d.fillRect(left, 0, width, h);
+			}
+		}
+		ctx2d.strokeStyle = hexToRgba(selectionColor, 0.38);
+		ctx2d.lineWidth = 1;
+		ctx2d.beginPath();
+		ctx2d.moveTo(x + 0.5, 0);
+		ctx2d.lineTo(x + 0.5, h);
+		ctx2d.stroke();
+		ctx2d.fillStyle = hexToRgba(selectionColor, 0.5);
+		ctx2d.beginPath();
+		ctx2d.arc(x, h * 0.5, 2.15, 0, Math.PI * 2);
+		ctx2d.fill();
+		ctx2d.restore();
 	}
 
 	function drawPlayhead() {
@@ -616,6 +648,17 @@ export function createWaveformView(canvas: HTMLCanvasElement) {
 			if (timeSec == null && playheadSec == null) return;
 			if (timeSec != null && playheadSec != null && Math.abs(timeSec - playheadSec) < 0.0008) return;
 			playheadSec = timeSec;
+			draw();
+		},
+		setGrainCursor: (timeSec: number | null, originSec?: number | null) => {
+			const nextOrigin = timeSec == null ? null : (originSec ?? null);
+			const cursorUnchanged = (timeSec == null && grainCursorSec == null)
+				|| (timeSec != null && grainCursorSec != null && Math.abs(timeSec - grainCursorSec) < 0.0015);
+			const originUnchanged = (nextOrigin == null && grainOriginSec == null)
+				|| (nextOrigin != null && grainOriginSec != null && Math.abs(nextOrigin - grainOriginSec) < 0.0015);
+			if (cursorUnchanged && originUnchanged) return;
+			grainCursorSec = timeSec;
+			grainOriginSec = nextOrigin;
 			draw();
 		},
 		setPlaybackVisual: (timeSec: number | null, live: Map<string, number> | null) => {

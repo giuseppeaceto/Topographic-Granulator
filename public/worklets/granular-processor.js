@@ -41,6 +41,9 @@ class GranularProcessor extends AudioWorkletProcessor {
     this.heapBuffer = null;
     this.useWasm = false;
     this.wasmExports = null;
+    this.readHeadCounter = 0;
+    this.lastReadHead = -1;
+    this.lastReadOrigin = -1;
 
     this.port.onmessage = async (e) => {
       const msg = e.data;
@@ -205,6 +208,11 @@ class GranularProcessor extends AudioWorkletProcessor {
         this.running = !!msg.on;
         if (this.useWasm && this.wasmEnginePtr) {
             this.wasmInstance.exports.granularengine_set_playing(this.wasmEnginePtr, this.running);
+            if (!this.running) {
+                this.lastReadHead = -1;
+                this.lastReadOrigin = -1;
+                this.port.postMessage({ type: 'readHead', sample: -1, origin: -1 });
+            }
         }
       } else if (msg?.type === 'setGrainAnchor') {
         if (this.useWasm && this.wasmEnginePtr) {
@@ -278,6 +286,24 @@ class GranularProcessor extends AudioWorkletProcessor {
             output[1].set(right);
             for (let ch = 2; ch < numChannels; ch++) {
                 output[ch].set(output[ch & 1]);
+            }
+        }
+
+        this.readHeadCounter = (this.readHeadCounter || 0) + 1;
+        if (this.readHeadCounter >= 10) {
+            this.readHeadCounter = 0;
+            const readFn = exports.granularengine_read_head;
+            const originFn = exports.granularengine_read_origin;
+            if (typeof readFn === 'function') {
+                const sample = this.running ? readFn(this.wasmEnginePtr) : -1;
+                const origin = this.running && typeof originFn === 'function'
+                    ? originFn(this.wasmEnginePtr)
+                    : -1;
+                if (sample !== this.lastReadHead || origin !== this.lastReadOrigin) {
+                    this.lastReadHead = sample;
+                    this.lastReadOrigin = origin;
+                    this.port.postMessage({ type: 'readHead', sample, origin });
+                }
             }
         }
         

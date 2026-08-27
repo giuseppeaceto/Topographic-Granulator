@@ -11,7 +11,7 @@ import { createXYPadThree } from './modules/ui/XYPadThree';
 import { createMotionPanel } from './modules/ui/MotionPanel';
 import { PARAMS, type ParamId } from './modules/ui/ParamRegistry';
 import { ParameterMapper } from './modules/utils/ParameterMapper';
-import { GRAIN_SIZE_MIN_MS, grainSizeMaxMs, RANDOM_START_MIN_MS, randomStartMaxMs, toEngineGranular } from './modules/utils/grainLimits';
+import { GRAIN_SIZE_CLASSIC_MAX_MS, GRAIN_SIZE_MIN_MS, grainSizeMaxMs, RANDOM_START_MIN_MS, randomStartMaxMs, toEngineGranular } from './modules/utils/grainLimits';
 import { loadMappings } from './modules/midi/MidiManager';
 import { createPadParamStore, defaultEffects, defaultGranular, type PadParams } from './modules/editor/PadParamStore';
 import { defaultMarkerSeq, clearMarkers, isDiscreteGrainMode, shiftMarkersWithRegion, setMarkerHold, setMarkerDrift, markerHold, markerDriftMs, markerDriftHz, markersInRegion, type MarkerSeqParams } from './modules/editor/MarkerStore';
@@ -1604,6 +1604,7 @@ function startVisualizationLoop() {
 
             if (allPositions.length === 0 && !pos && !seqRunning) {
                 xy.setGhostPositions?.([]);
+                waveform.setGrainCursor(null);
                 lastVizX = NaN;
                 lastVizY = NaN;
                 lastUpdate = now;
@@ -1644,8 +1645,21 @@ function startVisualizationLoop() {
                     : null;
                 waveform.setPlaybackVisual(visual?.playheadSec ?? null, live && live.size > 0 ? live : null);
                 syncMarkerSurvey(visual);
+
+                const pad = state.padParams.get(state.activePadIndex);
+                const region = state.regions.get(state.activePadIndex);
+                const grainMs = pad?.granular.grainSizeMs ?? 0;
+                const regionMs = region ? Math.max(0, (region.end - region.start) * 1000) : 0;
+                const longGrain = grainMs > GRAIN_SIZE_CLASSIC_MAX_MS
+                    || (regionMs > 0 && grainMs >= regionMs * 0.35);
+                const head = longGrain && state.voiceManager.isPadPlaying(state.activePadIndex)
+                    ? state.voiceManager.getVoiceReadHead(state.activePadIndex)
+                    : null;
+                if (head) waveform.setGrainCursor(head.readSec, head.originSec);
+                else waveform.setGrainCursor(null);
             } else {
                 waveform.setPlaybackVisual(null, null);
+                waveform.setGrainCursor(null);
                 xy.setMarkerSurvey?.(null);
             }
 

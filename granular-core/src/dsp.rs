@@ -233,6 +233,11 @@ impl DelayLine {
         self.buffer[self.write_pos] = sample;
         self.write_pos = (self.write_pos + 1) % self.buffer.len();
     }
+
+    pub fn clear(&mut self) {
+        self.buffer.fill(0.0);
+        self.write_pos = 0;
+    }
 }
 
 struct Comb {
@@ -266,6 +271,11 @@ impl Comb {
     fn set_damp(&mut self, val: f32) {
         self.damp = val;
     }
+
+    fn clear(&mut self) {
+        self.delay.clear();
+        self.filter_store = 0.0;
+    }
 }
 
 struct Allpass {
@@ -286,6 +296,10 @@ impl Allpass {
         let to_delay = input + (buffered_val * self.feedback);
         self.delay.write(to_delay);
         buffered_val - input
+    }
+
+    fn clear(&mut self) {
+        self.delay.clear();
     }
 }
 
@@ -353,6 +367,17 @@ impl Reverb {
         }
     }
 
+    pub fn clear(&mut self) {
+        for c in self.combs_l.iter_mut().chain(self.combs_r.iter_mut()) {
+            c.clear();
+        }
+        for a in self.allpasses_l.iter_mut().chain(self.allpasses_r.iter_mut()) {
+            a.clear();
+        }
+        self.predelay_l.clear();
+        self.predelay_r.clear();
+    }
+
     pub fn process(&mut self, input_l: f32, input_r: f32) -> (f32, f32) {
         if self.mix <= 0.001 {
             return (input_l, input_r);
@@ -401,6 +426,10 @@ impl StereoLimiter {
             decay: (-1.0 / (0.05 * sample_rate)).exp(),
             threshold: 0.95,
         }
+    }
+
+    pub fn reset(&mut self) {
+        self.peak = 0.0;
     }
 
     pub fn process(&mut self, l: f32, r: f32) -> (f32, f32) {

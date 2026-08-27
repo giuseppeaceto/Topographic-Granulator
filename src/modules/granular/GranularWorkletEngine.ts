@@ -21,6 +21,9 @@ export type GranularWorkletEngine = {
 	setGrainAnchor: (sample: number, enabled: boolean) => void;
 	setAutoSpawn: (enabled: boolean) => void;
 	spawnNow: (count?: number) => void;
+	clearBuffer: () => void;
+	getReadHeadSample: () => number;
+	getReadOriginSample: () => number;
 };
 
 // Helper to get correct worklet path for Electron and browser
@@ -101,6 +104,9 @@ export async function createGranularWorkletEngine(ctx: AudioContext): Promise<Gr
 			const msg = ev.data;
 			if (msg?.type === 'wasmError') {
 				logger.error('Audio worklet failed to init WASM:', msg.error);
+			} else if (msg?.type === 'readHead') {
+				readHeadSample = typeof msg.sample === 'number' ? msg.sample : -1;
+				readOriginSample = typeof msg.origin === 'number' ? msg.origin : -1;
 			}
 		};
 
@@ -127,6 +133,8 @@ export async function createGranularWorkletEngine(ctx: AudioContext): Promise<Gr
 			reverbDamp: 0.5,
 			masterGain: 0.9
 		};
+		let readHeadSample = -1;
+		let readOriginSample = -1;
 		// ... closures ...
 		function connect(dest: AudioNode) { node.connect(dest); }
 		function disconnect() { node.disconnect(); }
@@ -231,6 +239,8 @@ export async function createGranularWorkletEngine(ctx: AudioContext): Promise<Gr
 			node.port.postMessage({ type: 'trigger', on: true });
 		}
 		function stop() {
+			readHeadSample = -1;
+			readOriginSample = -1;
 			node.port.postMessage({ type: 'trigger', on: false });
 		}
 		function setGrainAnchor(sample: number, enabled: boolean) {
@@ -242,8 +252,17 @@ export async function createGranularWorkletEngine(ctx: AudioContext): Promise<Gr
 		function spawnNow(count: number = 1) {
 			node.port.postMessage({ type: 'spawnNow', count: Math.max(1, Math.round(count)) });
 		}
+		function clearBuffer() {
+			buffer = null;
+			readHeadSample = -1;
+			readOriginSample = -1;
+			node.port.postMessage({ type: 'setBuffer', channels: [new Float32Array(0)] });
+			node.port.postMessage({ type: 'trigger', on: false });
+		}
+		function getReadHeadSample() { return readHeadSample; }
+		function getReadOriginSample() { return readOriginSample; }
 
-		return { connect, disconnect, setBuffer, setRegion, setParams, setEffectParams, setAllParams, trigger, stop, setGrainAnchor, setAutoSpawn, spawnNow };
+		return { connect, disconnect, setBuffer, setRegion, setParams, setEffectParams, setAllParams, trigger, stop, setGrainAnchor, setAutoSpawn, spawnNow, clearBuffer, getReadHeadSample, getReadOriginSample };
 	} catch (nodeError) {
 		logger.error('Error creating AudioWorkletNode:', nodeError);
 		throw nodeError;

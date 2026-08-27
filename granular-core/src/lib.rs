@@ -267,6 +267,8 @@ impl GranularEngine {
     }
 
     fn set_buffer_internal(&mut self, buffer_ptr: *const f32, len: usize) {
+        self.kill_all_grains_internal();
+        self.flush_fx_internal();
         let slice = unsafe { std::slice::from_raw_parts(buffer_ptr, len) };
         self.audio_buffer = slice.to_vec();
         self.snap_region(0, self.audio_buffer.len());
@@ -300,6 +302,7 @@ impl GranularEngine {
         random_start_ms: f32,
         pitch_semitones: f32,
     ) {
+        let prev_size = self.grain_size_ms;
         self.grain_size_ms = grain_size_ms;
         self.density = density;
         self.random_start_ms = random_start_ms;
@@ -308,6 +311,87 @@ impl GranularEngine {
         let grain_ms = self.grain_size_ms.min(self.region_ms());
         let density = effective_density(self.density, grain_ms, self.region_ms());
         self.overlap_comp_target = overlap_compensation(density, grain_ms);
+        if (prev_size - grain_size_ms).abs() > 0.5 {
+            let requested = ((grain_ms / 1000.0) as f64 * (self.sample_rate as f64)).max(1.0);
+            let reg_len = (self.region_end_target.saturating_sub(self.region_start_target).max(1)) as f64;
+            self.retarget_active_grain_lengths(requested.min(reg_len));
+        }
+    }
+
+    fn kill_all_grains_internal(&mut self) {
+        for g in self.grains.iter_mut() {
+            *g = Grain::empty();
+        }
+        self.active_count = 0;
+        self.free = make_index_range();
+        self.free_count = MAX_GRAINS;
+        self.time_since_last_grain = 0.0;
+    }
+
+    fn flush_fx_internal(&mut self) {
+        self.delay_l.clear();
+        self.delay_r.clear();
+        self.reverb.clear();
+        self.limiter.reset();
+    }
+
+    fn retarget_active_grain_lengths(&mut self, new_length: f64) {
+        let fade = (self.sample_rate as f64 * 0.012).max(64.0);
+        let mut i = 0;
+        while i < self.active_count {
+            let gi = self.active[i] as usize;
+            let g = &mut self.grains[gi];
+            if g.age >= new_length {
+                let length = g.age + fade;
+                g.length = length;
+                g.attack = 0.0;
+                g.release = (fade / length.max(1.0)).min(0.95) as f32;
+            } else if g.length > new_length {
+                g.length = new_length.max(1.0);
+            }
+            i += 1;
+        }
+    }
+
+    fn wrapped_read_sample(&self, pos: f64) -> f64 {
+        let reg_start = self.region_start as f64;
+        let reg_len = (self.region_end as f64 - reg_start).max(1.0);
+        reg_start + (pos - reg_start).rem_euclid(reg_len)
+    }
+
+    fn primary_grain(&self) -> Option<&Grain> {
+        if self.active_count == 0 {
+            return None;
+        }
+        let mut best: Option<&Grain> = None;
+        let mut best_len = -1.0f64;
+        let mut i = 0;
+        while i < self.active_count {
+            let g = &self.grains[self.active[i] as usize];
+            if g.active && g.length > best_len {
+                best_len = g.length;
+                best = Some(g);
+            }
+            i += 1;
+        }
+        best
+    }
+
+    fn read_head_sample(&self) -> f64 {
+        match self.primary_grain() {
+            Some(g) => self.wrapped_read_sample(g.start_sample),
+            None => -1.0,
+        }
+    }
+
+    fn read_origin_sample(&self) -> f64 {
+        match self.primary_grain() {
+            Some(g) => {
+                let origin = g.start_sample - g.age * self.current_rate.max(1e-9);
+                self.wrapped_read_sample(origin)
+            }
+            None => -1.0,
+        }
     }
 
     fn region_ms(&self) -> f32 {
@@ -498,6 +582,10 @@ impl GranularEngine {
     }
 
     fn set_playing_internal(&mut self, playing: bool) {
+        if !playing && self.is_playing {
+            self.kill_all_grains_internal();
+            self.flush_fx_internal();
+        }
         self.is_playing = playing;
     }
 
@@ -756,6 +844,16 @@ pub fn granularengine_set_all_params(
 #[wasm_bindgen]
 pub fn granularengine_set_playing(engine: &mut GranularEngine, playing: bool) {
     engine.set_playing_internal(playing);
+}
+
+#[wasm_bindgen]
+pub fn granularengine_read_head(engine: &GranularEngine) -> f64 {
+    engine.read_head_sample()
+}
+
+#[wasm_bindgen]
+pub fn granularengine_read_origin(engine: &GranularEngine) -> f64 {
+    engine.read_origin_sample()
 }
 
 #[wasm_bindgen]

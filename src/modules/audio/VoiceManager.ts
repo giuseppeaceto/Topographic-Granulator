@@ -348,12 +348,19 @@ export class VoiceManager {
 	async setBufferForPad(padIndex: number, buffer: AudioBuffer | null) {
 		if (buffer) this.padBuffers.set(padIndex, buffer);
 		else this.padBuffers.delete(padIndex);
-		const voice = this.getActiveVoiceForPad(padIndex);
 		const next = buffer ?? this.buffer;
-		if (voice && next && voice.lastAudioBuffer !== next) {
-			await voice.engine.setBuffer(next);
-			voice.lastAudioBuffer = next;
-		}
+		await Promise.all(this.voices.map(async v => {
+			if (v.padIndex !== padIndex) return;
+			if (!next) {
+				v.engine.clearBuffer();
+				v.lastAudioBuffer = null;
+				return;
+			}
+			if (v.lastAudioBuffer !== next) {
+				await v.engine.setBuffer(next);
+				v.lastAudioBuffer = next;
+			}
+		}));
 	}
 
 	getBufferForPad(padIndex: number): AudioBuffer | null {
@@ -362,6 +369,17 @@ export class VoiceManager {
 
 	clearPadBuffer(padIndex: number) {
 		this.padBuffers.delete(padIndex);
+		for (const v of this.voices) {
+			if (v.padIndex !== padIndex) continue;
+			v.engine.stop();
+			if (this.buffer) {
+				void v.engine.setBuffer(this.buffer);
+				v.lastAudioBuffer = this.buffer;
+			} else {
+				v.engine.clearBuffer();
+				v.lastAudioBuffer = null;
+			}
+		}
 	}
 
 	// Trigger a voice for a specific pad
@@ -542,9 +560,22 @@ export class VoiceManager {
 			.sort((a, b) => b.startTime - a.startTime)[0];
 	}
 
-    // Check if a pad is already playing
     isPadPlaying(padIndex: number): boolean {
         return this.voices.some(v => v.active && v.padIndex === padIndex);
+    }
+
+    getVoiceReadHead(padIndex: number): { readSec: number; originSec: number } | null {
+        const voice = this.getActiveVoiceForPad(padIndex);
+        if (!voice) return null;
+        const sample = voice.engine.getReadHeadSample();
+        if (sample < 0) return null;
+        const buf = this.getBufferForPad(padIndex);
+        if (!buf) return null;
+        const origin = voice.engine.getReadOriginSample();
+        return {
+            readSec: sample / buf.sampleRate,
+            originSec: origin >= 0 ? origin / buf.sampleRate : sample / buf.sampleRate
+        };
     }
 
     // Get current motion path progress for a pad (in ms)
